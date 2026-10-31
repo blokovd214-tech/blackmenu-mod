@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "blackmenu",
+  "version": "${version}",
+  "name": "Black Menu",
+  "description": "Minimal black visual menu. Open with Right Shift.",
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.blackmenu.BlackMenuClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
