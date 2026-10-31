@@ -1,0 +1,191 @@
+package com.blackmenu;
+
+import com.mojang.blaze3d.systems.RenderSystem;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.render.RenderLayer;
+import net.minecraft.client.render.VertexConsumerProvider;
+import net.minecraft.client.util.BufferAllocator;
+import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.entity.Entity;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+
+/** World rendering: aurora sky, smooth flying particles and target effects, drawn as soft additive glow. */
+public final class Fx {
+    private static final long[] TIMES = {0L, 18000L, 12800L, 23000L, 6000L};
+    public static final String[] TIME_NAMES = {"Server", "Night", "Sunset", "Dawn", "Day"};
+    public static final String[] AURORA_COLORS = {"Green", "Blue", "Violet", "Rainbow"};
+
+    private static VertexConsumerProvider.Immediate imm;
+
+    private Fx() {}
+
+    /** Called every tick AND every frame, so the sky never flickers back to server time. */
+    static void applyTime(MinecraftClient mc) {
+        if (!Cfg.atmo || mc.world == null) return;
+        if (Cfg.atmoTime <= 0 || Cfg.atmoTime >= TIMES.length) return;
+        mc.world.setTimeOfDay(TIMES[Cfg.atmoTime]);
+    }
+
+    public static void render(WorldRenderContext ctx) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        ClientWorld w = mc.world;
+        MatrixStack ms = ctx.matrixStack();
+        if (w == null || mc.player == null || ms == null) return;
+
+        boolean doAur = Cfg.atmo && Cfg.aurora;
+        boolean doFly = Cfg.atmo && Cfg.flies;
+        Entity target = TargetEsp.pick(mc);
+        if (!doAur && !doFly && target == null) return;
+
+        if (imm == null) imm = VertexConsumerProvider.immediate(new BufferAllocator(1 << 20));
+
+        float td = mc.getRenderTickCounter().getTickDelta(false);
+        Vec3d cam = ctx.camera().getPos();
+        double t = (w.getTime() + td) / 20.0;
+
+        Gfx.m = ms.peek().getPositionMatrix();
+        Gfx.vc = imm.getBuffer(RenderLayer.getLightning());
+
+        if (doAur) Aurora.draw(w, t, td);
+        if (doFly) Flies.draw(cam, td);
+        if (target != null) TargetEsp.draw(target, cam, t, td);
+
+        // glow must not be eaten by distance fog
+        float fs = RenderSystem.getShaderFogStart(), fe = RenderSystem.getShaderFogEnd();
+        RenderSystem.setShaderFogStart(1.0E8f);
+        RenderSystem.setShaderFogEnd(2.0E8f);
+        imm.draw();
+        RenderSystem.setShaderFogStart(fs);
+        RenderSystem.setShaderFogEnd(fe);
+    }
+
+    // ------------------------------------------------------------------ aurora
+
+    static final class Aurora {
+        private static double smooth(double a, double b, double x) {
+            double k = Math.max(0, Math.min(1, (x - a) / (b - a)));
+            return k * k * (3 - 2 * k);
+        }
+
+        private static float[] color(double v, double s, double t) {
+            float[] a, b;
+            switch (Cfg.auroraColor) {
+                case 0 -> { a = new float[]{0.25f, 1f, 0.55f}; b = new float[]{0.55f, 0.35f, 1f}; }
+                case 1 -> { a = new float[]{0.25f, 0.9f, 1f}; b = new float[]{0.45f, 0.3f, 1f}; }
+                case 2 -> { a = new float[]{0.85f, 0.35f, 1f}; b = new float[]{1f, 0.45f, 0.65f}; }
+                default -> { return Gfx.hsv(0.3 + 0.35 * v + s * 0.2 + t * 0.01, 0.7, 1.0); }
+            }
+            float k = (float) Math.pow(v, 0.8);
+            return new float[]{a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k};
+        }
+
+        static void draw(ClientWorld w, double t, float td) {
+            if (!w.getRegistryKey().equals(World.OVERWORLD)) return;
+            double sun = Math.cos(w.getSkyAngle(td) * Math.PI * 2);
+            double night = Math.max(0, Math.min(1, (0.30 - sun) / 0.55));
+            night *= 1.0 - w.getRainGradient(td);
+            if (night < 0.01) return;
+
+            double spd = Cfg.auroraSpeed;
+            int n = 40, m = 7;
+            for (int k = 2; k >= 0; k--) {   // far to near
+                double rho = 240 + 45 * k;
+                double center = 0.9 + k * 2.1 + Math.sin(t * 0.05 * spd + k) * 0.15;
+                double span = 1.7;
+                Gfx.V[][] g = new Gfx.V[n][m];
+                for (int i = 0; i < n; i++) {
+                    double s = (double) i / (n - 1);
+                    double th = center - span / 2 + s * span;
+                    double r = rho + 28 * Math.sin(s * 6 + t * 0.35 * spd + k * 1.7)
+                            + 12 * Math.sin(s * 13 - t * 0.5 * spd);
+                    double y0 = 85 + 22 * Math.sin(s * 4 + t * 0.25 * spd + k);
+                    double hh = 110 + 45 * Math.sin(s * 3 - t * 0.2 * spd + k * 2);
+                    double x = Math.cos(th) * r, z = Math.sin(th) * r;
+                    double rays = 0.55 + 0.45 * Math.sin(s * 17 + t * 0.9 * spd + k * 3);
+                    double taper = Math.pow(Math.sin(Math.PI * s), 0.7);
+                    double breathe = 0.8 + 0.2 * Math.sin(t * 0.3 * spd + k);
+                    double base = 0.7 * Cfg.auroraGlow * night * rays * taper * breathe;
+                    for (int j = 0; j < m; j++) {
+                        double v = (double) j / (m - 1);
+                        double prof = smooth(0, 0.14, v) * Math.pow(1 - v, 1.6);
+                        g[i][j] = new Gfx.V(x, y0 + hh * v, z, color(v, s, t), (float) (base * prof));
+                    }
+                }
+                for (int i = 0; i < n - 1; i++) {
+                    for (int j = 0; j < m - 1; j++) {
+                        Gfx.quad(g[i][j], g[i + 1][j], g[i + 1][j + 1], g[i][j + 1]);
+                    }
+                }
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------- particles
+
+    static final class Flies {
+        private static final class F {
+            double x, y, z, px, py, pz, vx, vy, vz, seed, sz, d, ix, iy, iz;
+            int age, life;
+        }
+
+        private static final ArrayList<F> list = new ArrayList<>();
+
+        static void tick(MinecraftClient mc) {
+            if (!(Cfg.atmo && Cfg.flies) || mc.world == null || mc.player == null) {
+                list.clear();
+                return;
+            }
+            int target = (int) (110 * Cfg.fliesAmount);
+            for (int i = 0; i < 3 && list.size() < target; i++) {
+                double ang = Math.random() * Math.PI * 2, rr = 3 + Math.random() * 20;
+                F f = new F();
+                f.x = f.px = mc.player.getX() + Math.cos(ang) * rr;
+                f.y = f.py = mc.player.getY() - 1 + Math.random() * 8;
+                f.z = f.pz = mc.player.getZ() + Math.sin(ang) * rr;
+                f.seed = Math.random() * Math.PI * 2;
+                f.sz = 0.7 + Math.random() * 0.6;
+                f.life = 200 + (int) (Math.random() * 200);
+                list.add(f);
+            }
+            double sp = Cfg.fliesSpeed;
+            Iterator<F> it = list.iterator();
+            while (it.hasNext()) {
+                F f = it.next();
+                f.age++;
+                f.px = f.x; f.py = f.y; f.pz = f.z;
+                double tt = f.age * 0.04 * sp + f.seed;
+                f.vx = f.vx * 0.96 + Math.sin(tt * 1.3) * 0.0016 * sp;
+                f.vy = f.vy * 0.96 + (Math.sin(tt * 0.9 + 2) * 0.0010 + 0.0003) * sp;
+                f.vz = f.vz * 0.96 + Math.cos(tt * 1.1 + 1) * 0.0016 * sp;
+                f.x += f.vx; f.y += f.vy; f.z += f.vz;
+                double dx = f.x - mc.player.getX(), dz = f.z - mc.player.getZ();
+                if (f.age >= f.life || dx * dx + dz * dz > 45 * 45) it.remove();
+            }
+        }
+
+        static void draw(Vec3d cam, float td) {
+            if (list.isEmpty()) return;
+            for (F f : list) {
+                f.ix = f.px + (f.x - f.px) * td;
+                f.iy = f.py + (f.y - f.py) * td;
+                f.iz = f.pz + (f.z - f.pz) * td;
+                double dx = f.ix - cam.x, dy = f.iy - cam.y, dz = f.iz - cam.z;
+                f.d = dx * dx + dy * dy + dz * dz;
+            }
+            list.sort((a, b) -> Double.compare(b.d, a.d));   // far to near
+            for (F f : list) {
+                double fade = Math.min(1.0, Math.min(f.age / 30.0, (f.life - f.age) / 30.0));
+                double twinkle = 0.75 + 0.25 * Math.sin(f.age * 0.09 + f.seed);
+                float al = (float) (fade * twinkle * 0.9);
+                float[] col = Gfx.pal(Cfg.fliesColor, f.seed / (Math.PI * 2));
+                Gfx.disc(f.ix - cam.x, f.iy - cam.y, f.iz - cam.z, 0.16 * Cfg.fliesSize * f.sz, col, al);
+            }
+        }
+    }
+}

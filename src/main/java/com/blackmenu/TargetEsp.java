@@ -1,11 +1,6 @@
 package com.blackmenu;
 
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.VertexConsumerProvider;
-import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -13,75 +8,175 @@ import net.minecraft.util.math.Vec3d;
 
 import java.util.Random;
 
-/** Draws electric bolts around the player / animal / mob you are aiming at. */
-public final class TargetEsp {
-    private static final int BOLTS = 8, SEGMENTS = 6;
+/** Smooth glowing effects around the player / animal / mob you are aiming at. */
+final class TargetEsp {
+    private static Entity cur;
+    private static float fade;
+    private static long lastNs;
 
     private TargetEsp() {}
 
-    public static void render(WorldRenderContext ctx) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (!BlackMenuClient.targetEsp || mc.world == null) return;
-
-        Entity e = mc.targetedEntity;
-        if (!(e instanceof PlayerEntity || e instanceof MobEntity)) return;
-
-        VertexConsumerProvider consumers = ctx.consumers();
-        MatrixStack m = ctx.matrixStack();
-        if (consumers == null || m == null) return;
-
-        float td = mc.getRenderTickCounter().getTickDelta(false);
-        Vec3d cam = ctx.camera().getPos();
-        Vec3d pos = e.getLerpedPos(td);
-        double w = e.getWidth() * 0.5 + 0.25;
-        double h = e.getHeight();
-
-        m.push();
-        m.translate(pos.x - cam.x, pos.y - cam.y, pos.z - cam.z);
-        MatrixStack.Entry entry = m.peek();
-        VertexConsumer vc = consumers.getBuffer(RenderLayer.getLines());
-
-        // new bolt shapes every 2 ticks -> flicker
-        Random rnd = new Random(e.getId() * 341873128712L + (mc.world.getTime() / 2) * 132897987541L);
-
-        for (int i = 0; i < BOLTS; i++) {
-            double a0 = rnd.nextDouble() * Math.PI * 2;
-            double a1 = a0 + (rnd.nextDouble() - 0.5) * 2.2;
-            double y0 = rnd.nextDouble() * h;
-            double y1 = Math.max(-0.1, Math.min(h + 0.2, y0 + (rnd.nextDouble() - 0.5) * h * 1.2));
-
-            double[][] p = new double[SEGMENTS + 1][3];
-            for (int k = 0; k <= SEGMENTS; k++) {
-                double t = (double) k / SEGMENTS;
-                double ang = a0 + (a1 - a0) * t;
-                double rad = w + Math.sin(t * Math.PI) * 0.12;
-                double j = (k == 0 || k == SEGMENTS) ? 0 : 0.14;
-                p[k][0] = Math.cos(ang) * rad + (rnd.nextDouble() - 0.5) * j;
-                p[k][1] = y0 + (y1 - y0) * t + (rnd.nextDouble() - 0.5) * j;
-                p[k][2] = Math.sin(ang) * rad + (rnd.nextDouble() - 0.5) * j;
-            }
-
-            for (int k = 0; k < SEGMENTS; k++) {
-                line(vc, entry, p[k], p[k + 1], 0.35f, 0.75f, 1f, 0.55f, 0.02);
-                line(vc, entry, p[k], p[k + 1], 0.35f, 0.75f, 1f, 0.55f, -0.02);
-                line(vc, entry, p[k], p[k + 1], 1f, 1f, 1f, 1f, 0);
-            }
+    /** Returns the entity to draw effects on (with fade in/out), or null. */
+    static Entity pick(MinecraftClient mc) {
+        long now = System.nanoTime();
+        float dt = lastNs == 0 ? 0.016f : Math.min(0.1f, (now - lastNs) / 1.0e9f);
+        lastNs = now;
+        Entity t = Cfg.esp ? mc.targetedEntity : null;
+        if (t instanceof PlayerEntity || t instanceof MobEntity) {
+            cur = t;
+            fade = Math.min(1f, fade + dt * 6f);
+        } else {
+            fade = Math.max(0f, fade - dt * 4f);
         }
-
-        m.pop();
-        if (consumers instanceof VertexConsumerProvider.Immediate imm) imm.draw(RenderLayer.getLines());
+        if (cur == null || cur.isRemoved() || fade <= 0.01f) return null;
+        return cur;
     }
 
-    private static void line(VertexConsumer vc, MatrixStack.Entry e, double[] p0, double[] p1,
-                             float cr, float cg, float cb, float ca, double off) {
-        float dx = (float) (p1[0] - p0[0]), dy = (float) (p1[1] - p0[1]), dz = (float) (p1[2] - p0[2]);
-        float len = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
-        if (len < 1e-4f) return;
-        dx /= len; dy /= len; dz /= len;
-        int r = (int) (cr * 255), g = (int) (cg * 255), b = (int) (cb * 255), a = (int) (ca * 255);
-        vc.vertex(e.getPositionMatrix(), (float) (p0[0] + off), (float) p0[1], (float) (p0[2] + off))
-                .color(r, g, b, a).normal(e, dx, dy, dz);
-        vc.vertex(e.getPositionMatrix(), (float) (p1[0] + off), (float) p1[1], (float) (p1[2] + off))
-                .color(r, g, b, a).normal(e, dx, dy, dz);
+    static void draw(Entity e, Vec3d cam, double t, float td) {
+        Vec3d p = e.getLerpedPos(td);
+        double bx = p.x - cam.x, by = p.y - cam.y, bz = p.z - cam.z;
+        double h = e.getHeight();
+        double sz = Cfg.espSize;
+        double rw = e.getWidth() * 0.5 + 0.22 * sz;
+        double tt = t * Cfg.espSpeed;
+        float a = Cfg.espAlpha * fade;
+
+        if (Cfg.espLightning) lightning(e, bx, by, bz, h, rw, sz, tt, a);
+        if (Cfg.espCircle) circle(bx, by, bz, h, rw, sz, tt, a);
+        if (Cfg.espChains) chains(bx, by, bz, h, rw, sz, tt, a);
+        if (Cfg.espOrbs) orbs(bx, by, bz, h, rw, sz, tt, a);
+    }
+
+    private static void lightning(Entity e, double bx, double by, double bz, double h, double rw,
+                                  double sz, double tt, float a) {
+        for (int i = 0; i < 5; i++) {
+            double period = 0.9 + 0.17 * i;
+            double x = (tt + i * 0.37) / period;
+            long cycle = (long) Math.floor(x);
+            double u = x - cycle;
+            double env = Math.pow(Math.sin(Math.PI * u), 1.5);
+            if (env < 0.01) continue;
+
+            Random r = new Random(e.getId() * 7919L + i * 104729L + cycle * 1299709L);
+            double a0 = r.nextDouble() * Math.PI * 2;
+            double sweep = (0.8 + r.nextDouble() * 1.4) * (r.nextBoolean() ? 1 : -1);
+            double y0 = h * (0.1 + 0.8 * r.nextDouble());
+            double dy = (r.nextDouble() - 0.5) * h * 0.9;
+
+            int k = 6;
+            double[][] ctl = new double[k][3];
+            for (int q = 0; q < k; q++) {
+                double s = q / (double) (k - 1);
+                double j = (q == 0 || q == k - 1) ? 0 : 0.10 * sz;
+                double ang = a0 + sweep * s;
+                double rad = rw + (r.nextDouble() - 0.5) * 0.1 * sz;
+                double wob = Math.sin(tt * 3 + q * 1.7 + i) * 0.025 * sz;
+                ctl[q][0] = bx + Math.cos(ang) * rad + (r.nextDouble() - 0.5) * 2 * j + wob;
+                ctl[q][1] = by + y0 + dy * s + (r.nextDouble() - 0.5) * 2 * j;
+                ctl[q][2] = bz + Math.sin(ang) * rad + (r.nextDouble() - 0.5) * 2 * j - wob;
+            }
+            double[][] pts = Gfx.spline(ctl, 5);
+            Gfx.Path path = new Gfx.Path();
+            for (int q = 0; q < pts.length; q++) {
+                double s = q / (double) (pts.length - 1);
+                double taper = Math.sin(Math.PI * s);
+                path.add(pts[q][0], pts[q][1], pts[q][2], Math.pow(taper, 0.6),
+                        env * a * Math.pow(taper, 0.5), Gfx.pal(Cfg.espColor, i * 0.17 + s * 0.2 + tt * 0.05));
+            }
+            Gfx.ribbon(path, false, false, 0.085 * sz, 0.28f, 0f);
+            Gfx.ribbon(path, false, false, 0.016 * sz, 1f, 0.7f);
+        }
+    }
+
+    private static void circle(double bx, double by, double bz, double h, double rw,
+                               double sz, double tt, float a) {
+        // ground ring with a slowly rotating highlight
+        double rr = rw * 1.1 + 0.15 * sz;
+        int n = 72;
+        Gfx.Path ring = new Gfx.Path();
+        for (int i = 0; i < n; i++) {
+            double ang = Math.PI * 2 * i / n;
+            double hl = 0.5 + 0.5 * Math.sin(2 * ang - tt * 2.2);
+            ring.add(bx + Math.cos(ang) * rr, by + 0.03, bz + Math.sin(ang) * rr, 1,
+                    a * (0.30 + 0.70 * hl), Gfx.pal(Cfg.espColor, ang / (Math.PI * 2) + tt * 0.05));
+        }
+        Gfx.ribbon(ring, true, true, 0.14 * sz, 0.35f, 0f);
+        Gfx.ribbon(ring, true, true, 0.03 * sz, 1f, 0.6f);
+
+        // scanner ring gliding up and down the body
+        double u = 0.5 + 0.5 * Math.sin(tt * 1.6);
+        double env = Math.pow(Math.sin(Math.PI * u), 0.5);
+        double rs = rw * 0.95;
+        Gfx.Path sc = new Gfx.Path();
+        for (int i = 0; i < n; i++) {
+            double ang = Math.PI * 2 * i / n;
+            sc.add(bx + Math.cos(ang) * rs, by + h * u, bz + Math.sin(ang) * rs, 1,
+                    a * 0.8 * env, Gfx.pal(Cfg.espColor, ang / (Math.PI * 2) + tt * 0.05));
+        }
+        Gfx.ribbon(sc, true, true, 0.08 * sz, 0.3f, 0f);
+        Gfx.ribbon(sc, true, true, 0.015 * sz, 1f, 0.6f);
+    }
+
+    private static void chains(double bx, double by, double bz, double h, double rw,
+                               double sz, double tt, float a) {
+        int links = 12;
+        double span = h + 0.2;
+        double turns = Math.PI * 2 * 1.25;
+        for (int c = 0; c < 2; c++) {
+            for (int j = 0; j < links; j++) {
+                double s = (j + 0.5) / links;
+                double ang = c * Math.PI + tt * 1.1 + s * turns;
+                double rad = rw + 0.02;
+                double cx = bx + Math.cos(ang) * rad, cy = by + s * span, cz = bz + Math.sin(ang) * rad;
+
+                // tangent T, radial N, binormal B
+                double tx = -Math.sin(ang) * rad * turns, ty = span, tz = Math.cos(ang) * rad * turns;
+                double tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
+                tx /= tl; ty /= tl; tz /= tl;
+                double nx = Math.cos(ang), ny = 0, nz = Math.sin(ang);
+                double qx = ty * nz - tz * ny, qy = tz * nx - tx * nz, qz = tx * ny - ty * nx;
+                double ql = Math.sqrt(qx * qx + qy * qy + qz * qz);
+                qx /= ql; qy /= ql; qz /= ql;
+
+                // every second link is turned 90 degrees so they interlock
+                double ox = (j % 2 == 0) ? nx : qx, oy = (j % 2 == 0) ? ny : qy, oz = (j % 2 == 0) ? nz : qz;
+                double la = 0.09 * sz, lb = 0.05 * sz;
+                double al = a * 0.95 * Math.pow(Math.sin(Math.PI * s), 0.35);
+                float[] col = Gfx.pal(Cfg.espColor, s + c * 0.5 + tt * 0.05);
+
+                Gfx.Path lk = new Gfx.Path();
+                for (int q = 0; q < 12; q++) {
+                    double ph = Math.PI * 2 * q / 12, cs = Math.cos(ph), sn = Math.sin(ph);
+                    lk.add(cx + tx * la * cs + ox * lb * sn,
+                            cy + ty * la * cs + oy * lb * sn,
+                            cz + tz * la * cs + oz * lb * sn, 1, al, col);
+                }
+                Gfx.ribbon(lk, true, false, 0.035 * sz, 0.3f, 0f);
+                Gfx.ribbon(lk, true, false, 0.011 * sz, 1f, 0.6f);
+            }
+        }
+    }
+
+    private static void orbs(double bx, double by, double bz, double h, double rw,
+                             double sz, double tt, float a) {
+        for (int i = 0; i < 3; i++) {
+            float[] col = Gfx.pal(Cfg.espColor, i / 3.0 + tt * 0.03);
+            Gfx.Path tr = new Gfx.Path();
+            double hx = 0, hy = 0, hz = 0;
+            int len = 18;
+            for (int k = 0; k < len; k++) {
+                double tk = tt - k * 0.035;
+                double ang = i * Math.PI * 2 / 3 + tk * (2.2 + 0.5 * i);
+                double yy = h * (0.2 + 0.6 * (0.5 + 0.5 * Math.sin(tk * 1.3 + i * 2.1)));
+                double rr = rw + 0.04 * sz;
+                double x = bx + Math.cos(ang) * rr, y = by + yy, z = bz + Math.sin(ang) * rr;
+                double f = 1 - k / (double) (len - 1);
+                tr.add(x, y, z, f, a * 0.9 * f * f, col);
+                if (k == 0) { hx = x; hy = y; hz = z; }
+            }
+            Gfx.ribbon(tr, false, false, 0.06 * sz, 0.3f, 0f);
+            Gfx.ribbon(tr, false, false, 0.016 * sz, 1f, 0.5f);
+            Gfx.disc(hx, hy, hz, 0.22 * sz, col, a * 0.9f);
+        }
     }
 }
