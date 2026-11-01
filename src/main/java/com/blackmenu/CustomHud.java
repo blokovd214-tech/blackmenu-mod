@@ -26,6 +26,8 @@ final class CustomHud {
 
         boolean spectator = mc.interactionManager != null
                 && mc.interactionManager.getCurrentGameMode() == GameMode.SPECTATOR;
+        float fl = Atmos.flash();
+        if (fl > 0.01f) c.fill(0, 0, c.getScaledWindowWidth(), c.getScaledWindowHeight(), Ui.argb(0xFFFFFF, fl * 0.3f));
         if (Cfg.hotbar && !spectator) hotbar(c, mc, dt);
         if (Cfg.infoPanel) info(c, mc);
     }

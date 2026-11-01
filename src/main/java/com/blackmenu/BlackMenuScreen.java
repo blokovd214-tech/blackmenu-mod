@@ -7,180 +7,50 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import org.lwjgl.glfw.GLFW;
 
-import java.util.EnumMap;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
-import java.util.function.IntConsumer;
-import java.util.function.IntSupplier;
-import java.util.function.Supplier;
+import java.util.function.DoubleConsumer;
 
 import static com.blackmenu.Ui.argb;
 import static com.blackmenu.Ui.inside;
 import static com.blackmenu.Ui.mix;
 import static com.blackmenu.Ui.rrect;
 
+/** Sidebar with categories, search, and three columns of module cards. */
 public class BlackMenuScreen extends Screen {
-    private static final int W = 260, ROW = 26, PAD = 16, HEAD = 52, R = 10, SW = 86, PILL = 100;
-    private static final float MIN_SCALE = 0.6f, MAX_SCALE = 1.5f;
-    private static final String[] HB_COLORS = {"By type", "Cyan", "Purple", "Pink", "Red", "Green", "Gold", "White", "Rainbow"};
+    private static final int W = 520, H = 290, SIDE = 118, R = 10, GAP = 8;
+    private static final int HEAD_H = 24, BOOL_H = 24, SLIDER_H = 30, MODE_H = 34, PAD_B = 6;
+    private static final Mods.Cat[] SIDE_CATS = {null, Mods.Cat.HUD, Mods.Cat.VISUAL, Mods.Cat.PVP, Mods.Cat.COSMETICS};
 
-    private enum Page {
-        MAIN(null, "BLACK MENU"),
-        VISUAL(MAIN, "VISUAL"), PVP(MAIN, "PVP"), WORLD(MAIN, "WORLD"), HUD(MAIN, "HUD"), SETTINGS(MAIN, "SETTINGS"),
-        BORDERS(VISUAL, "ITEM BORDERS"), BLUR(VISUAL, "BLUR+"),
-        HITBOX(PVP, "HITBOXES"), ESP(PVP, "TARGET ESP"),
-        ATMO(WORLD, "ATMOSPHERE"), DUST(WORLD, "CAVE DUST");
+    private static final class Hit {
+        final int x, y, w, h;
+        final boolean clipped;
+        final Runnable click;
+        final DoubleConsumer drag;
+        final Mods.Set set;
 
-        final Page parent;
-        final String title;
-
-        Page(Page parent, String title) {
-            this.parent = parent;
-            this.title = title;
+        Hit(int x, int y, int w, int h, boolean clipped, Runnable click, DoubleConsumer drag, Mods.Set set) {
+            this.x = x; this.y = y; this.w = w; this.h = h;
+            this.clipped = clipped; this.click = click; this.drag = drag; this.set = set;
         }
     }
 
-    private enum Kind { TOGGLE, SLIDER, CHOICE, LINK, SIZE }
-
-    private static final class Row {
-        Kind kind;
-        String name;
-        BooleanSupplier getB;
-        Consumer<Boolean> setB;
-        Page link;
-        Supplier<Float> getF;
-        Consumer<Float> setF;
-        float min, max;
-        String[] opts;
-        IntSupplier getI;
-        IntConsumer setI;
-        float anim;
-    }
-
-    private static Row toggle(String name, BooleanSupplier g, Consumer<Boolean> s, Page link) {
-        Row r = new Row();
-        r.kind = Kind.TOGGLE; r.name = name; r.getB = g; r.setB = s; r.link = link;
-        r.anim = g.getAsBoolean() ? 1f : 0f;
-        return r;
-    }
-
-    private static Row slider(String name, float min, float max, Supplier<Float> g, Consumer<Float> s) {
-        Row r = new Row();
-        r.kind = Kind.SLIDER; r.name = name; r.min = min; r.max = max; r.getF = g; r.setF = s;
-        return r;
-    }
-
-    private static Row choice(String name, String[] opts, IntSupplier g, IntConsumer s) {
-        Row r = new Row();
-        r.kind = Kind.CHOICE; r.name = name; r.opts = opts; r.getI = g; r.setI = s;
-        return r;
-    }
-
-    private static Row link(String name, Page p) {
-        Row r = new Row();
-        r.kind = Kind.LINK; r.name = name; r.link = p;
-        return r;
-    }
-
-    private static Row size() {
-        Row r = new Row();
-        r.kind = Kind.SIZE; r.name = "Menu size";
-        return r;
-    }
-
-    private final EnumMap<Page, List<Row>> pages = new EnumMap<>(Page.class);
-    private Page page = Page.MAIN;
-    private Row dragging;
+    private final List<Hit> hits = new ArrayList<>();
+    private Mods.Cat cat = null;               // null = all
+    private String query = "";
+    private boolean searchFocus, favOnly;
+    private float scroll, scrollTarget, maxScroll;
+    private Hit dragHit;
+    private Mods.Set dragSet;
+    private Mods.Set ddSet;
+    private int ddX, ddY, ddW;
+    private int cy0, cy1;
 
     private final long opened = System.currentTimeMillis();
     private long last = opened;
 
     public BlackMenuScreen() {
         super(Text.literal("Black Menu"));
-
-        pages.put(Page.MAIN, List.of(
-                link("Visual", Page.VISUAL),
-                link("PvP", Page.PVP),
-                link("World", Page.WORLD),
-                link("HUD", Page.HUD),
-                link("Settings", Page.SETTINGS)));
-
-        pages.put(Page.VISUAL, List.of(
-                toggle("Fullbright", () -> Cfg.fullbright, BlackMenuClient::setFullbright, null),
-                toggle("Smooth swapping", () -> Cfg.smoothSwap, v -> Cfg.smoothSwap = v, null),
-                slider("Swap speed", 0.5f, 3f, () -> Cfg.swapSpeed, v -> Cfg.swapSpeed = v),
-                toggle("Item borders", () -> Cfg.borders, v -> Cfg.borders = v, Page.BORDERS),
-                link("Blur+", Page.BLUR)));
-
-        pages.put(Page.PVP, List.of(
-                toggle("Hitboxes", () -> Cfg.hb, v -> Cfg.hb = v, Page.HITBOX),
-                toggle("Target ESP", () -> Cfg.esp, v -> Cfg.esp = v, Page.ESP)));
-
-        pages.put(Page.WORLD, List.of(
-                toggle("Atmosphere", () -> Cfg.atmo, v -> Cfg.atmo = v, Page.ATMO),
-                toggle("Cave dust", () -> Cfg.dust, v -> Cfg.dust = v, Page.DUST)));
-
-        pages.put(Page.HUD, List.of(
-                toggle("Hotbar", () -> Cfg.hotbar, v -> Cfg.hotbar = v, null),
-                toggle("Info panel", () -> Cfg.infoPanel, v -> Cfg.infoPanel = v, null),
-                toggle("FPS", () -> Cfg.fps, v -> Cfg.fps = v, null),
-                toggle("Coordinates", () -> Cfg.coords, v -> Cfg.coords = v, null),
-                toggle("Ping", () -> Cfg.ping, v -> Cfg.ping = v, null),
-                choice("Accent", Gfx.PALETTE, () -> Cfg.hudAccent, v -> Cfg.hudAccent = v),
-                slider("Opacity", 0.3f, 1f, () -> Cfg.hudAlpha, v -> Cfg.hudAlpha = v)));
-
-        pages.put(Page.SETTINGS, List.of(
-                toggle("Chain title screen", () -> Cfg.titleChains, v -> Cfg.titleChains = v, null),
-                size()));
-
-        pages.put(Page.BORDERS, List.of(
-                toggle("Inventory", () -> Cfg.bordersInv, v -> Cfg.bordersInv = v, null),
-                toggle("Hotbar", () -> Cfg.bordersHotbar, v -> Cfg.bordersHotbar = v, null),
-                toggle("Hide common", () -> Cfg.bordersHideCommon, v -> Cfg.bordersHideCommon = v, null),
-                slider("Opacity", 0.2f, 1f, () -> Cfg.bordersAlpha, v -> Cfg.bordersAlpha = v)));
-
-        pages.put(Page.BLUR, List.of(
-                toggle("Blur menu", () -> Cfg.blurMenu, v -> Cfg.blurMenu = v, null),
-                slider("Dim", 0f, 0.9f, () -> Cfg.blurDim, v -> Cfg.blurDim = v)));
-
-        pages.put(Page.HITBOX, List.of(
-                toggle("Players", () -> Cfg.hbPlayers, v -> Cfg.hbPlayers = v, null),
-                toggle("Mobs", () -> Cfg.hbMobs, v -> Cfg.hbMobs = v, null),
-                toggle("Others", () -> Cfg.hbOthers, v -> Cfg.hbOthers = v, null),
-                toggle("Fill", () -> Cfg.hbFill, v -> Cfg.hbFill = v, null),
-                toggle("Eye line", () -> Cfg.hbEye, v -> Cfg.hbEye = v, null),
-                choice("Color", HB_COLORS, () -> Cfg.hbColor, v -> Cfg.hbColor = v),
-                slider("Line width", 0.5f, 3f, () -> Cfg.hbWidth, v -> Cfg.hbWidth = v),
-                slider("Opacity", 0.2f, 1f, () -> Cfg.hbAlpha, v -> Cfg.hbAlpha = v)));
-
-        pages.put(Page.ESP, List.of(
-                toggle("Lightning", () -> Cfg.espLightning, v -> Cfg.espLightning = v, null),
-                toggle("Circle", () -> Cfg.espCircle, v -> Cfg.espCircle = v, null),
-                toggle("Chains", () -> Cfg.espChains, v -> Cfg.espChains = v, null),
-                toggle("Orbs", () -> Cfg.espOrbs, v -> Cfg.espOrbs = v, null),
-                choice("Color", Gfx.PALETTE, () -> Cfg.espColor, v -> Cfg.espColor = v),
-                slider("Size", 0.5f, 2f, () -> Cfg.espSize, v -> Cfg.espSize = v),
-                slider("Speed", 0.2f, 3f, () -> Cfg.espSpeed, v -> Cfg.espSpeed = v),
-                slider("Opacity", 0.2f, 1f, () -> Cfg.espAlpha, v -> Cfg.espAlpha = v)));
-
-        pages.put(Page.ATMO, List.of(
-                choice("Time", Fx.TIME_NAMES, () -> Cfg.atmoTime, v -> Cfg.atmoTime = v),
-                toggle("Aurora", () -> Cfg.aurora, v -> Cfg.aurora = v, null),
-                choice("Aurora color", Fx.AURORA_COLORS, () -> Cfg.auroraColor, v -> Cfg.auroraColor = v),
-                slider("Aurora glow", 0.2f, 2f, () -> Cfg.auroraGlow, v -> Cfg.auroraGlow = v),
-                slider("Aurora speed", 0.2f, 3f, () -> Cfg.auroraSpeed, v -> Cfg.auroraSpeed = v),
-                toggle("Particles", () -> Cfg.flies, v -> Cfg.flies = v, null),
-                choice("Particle color", Gfx.PALETTE, () -> Cfg.fliesColor, v -> Cfg.fliesColor = v),
-                slider("Particle amount", 0.1f, 2f, () -> Cfg.fliesAmount, v -> Cfg.fliesAmount = v),
-                slider("Particle size", 0.4f, 3f, () -> Cfg.fliesSize, v -> Cfg.fliesSize = v),
-                slider("Particle speed", 0.2f, 3f, () -> Cfg.fliesSpeed, v -> Cfg.fliesSpeed = v)));
-
-        pages.put(Page.DUST, List.of(
-                slider("Amount", 0.1f, 2f, () -> Cfg.dustAmount, v -> Cfg.dustAmount = v),
-                slider("Size", 0.4f, 3f, () -> Cfg.dustSize, v -> Cfg.dustSize = v),
-                slider("Speed", 0.2f, 3f, () -> Cfg.dustSpeed, v -> Cfg.dustSpeed = v),
-                choice("Color", Gfx.PALETTE, () -> Cfg.dustColor, v -> Cfg.dustColor = v)));
     }
 
     @Override
@@ -195,13 +65,13 @@ public class BlackMenuScreen extends Screen {
 
     // ---------- helpers ----------
 
+    private void add(int x, int y, int w, int h, boolean clipped, Runnable click, DoubleConsumer drag, Mods.Set set) {
+        hits.add(new Hit(x, y, w, h, clipped, click, drag, set));
+    }
+
     private float progress() {
         float t = Math.min(1f, (System.currentTimeMillis() - opened) / 200f);
         return 1f - (1f - t) * (1f - t);
-    }
-
-    private int panelH() {
-        return HEAD + pages.get(page).size() * ROW + 10;
     }
 
     private int px() {
@@ -209,11 +79,11 @@ public class BlackMenuScreen extends Screen {
     }
 
     private int py() {
-        return (height - panelH()) / 2 + (int) ((1f - progress()) * 8);
+        return (height - H) / 2 + (int) ((1f - progress()) * 8);
     }
 
     private float scale() {
-        float fit = Math.min((height - 16f) / panelH(), (width - 16f) / W);
+        float fit = Math.min((height - 12f) / H, (width - 12f) / W);
         return Math.max(0.3f, Math.min(Cfg.menuScale, fit));
     }
 
@@ -225,24 +95,50 @@ public class BlackMenuScreen extends Screen {
         return (my - height / 2.0) / scale() + height / 2.0;
     }
 
-    private void changeScale(float d) {
-        float v = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Cfg.menuScale + d));
-        Cfg.menuScale = Math.round(v * 20f) / 20f;
+    private void small(DrawContext c, String t, int x, int y, int color, float sc) {
+        MatrixStack ms = c.getMatrices();
+        ms.push();
+        ms.translate((float) x, (float) y, 0f);
+        ms.scale(sc, sc, 1f);
+        c.drawText(textRenderer, t, 0, 0, color, false);
+        ms.pop();
     }
 
-    private static int sliderX(int x) {
-        return x + W - PAD - 34 - SW;
+    private List<Mods.Mod> visible() {
+        List<Mods.Mod> out = new ArrayList<>();
+        String q = query.toLowerCase();
+        for (Mods.Mod m : Mods.ALL) {
+            if (!q.isEmpty()) {
+                if (!m.name.toLowerCase().contains(q)) continue;
+            } else if (cat == null ? m.cat == Mods.Cat.SETTINGS : m.cat != cat) {
+                continue;
+            }
+            if (favOnly && !Mods.isFav(m)) continue;
+            out.add(m);
+        }
+        return out;
     }
 
-    private void setSlider(Row r, double ux, int x) {
-        double f = Math.max(0, Math.min(1, (ux - sliderX(x)) / SW));
-        float v = (float) (r.min + f * (r.max - r.min));
-        r.setF.accept(Math.round(v * 10f) / 10f);
+    private static int setH(Mods.Set s) {
+        return switch (s.kind) {
+            case BOOL -> BOOL_H;
+            case SLIDER -> SLIDER_H;
+            case MODE -> MODE_H;
+        };
     }
 
-    private void go(Page p) {
-        page = p;
-        dragging = null;
+    private static int cardH(Mods.Mod m) {
+        int h = HEAD_H + PAD_B;
+        for (Mods.Set s : m.sets) h += setH(s);
+        return h;
+    }
+
+    private void setSlider(Mods.Set s, double ux, int bx, int bw) {
+        double f = Math.max(0, Math.min(1, (ux - bx) / bw));
+        float v = (float) (s.min + f * (s.max - s.min));
+        v = s.max >= 10 ? Math.round(v) : Math.round(v * 10f) / 10f;
+        if (s.deferred) s.pending = v;
+        else s.setF.accept(v);
     }
 
     // ---------- rendering ----------
@@ -260,6 +156,7 @@ public class BlackMenuScreen extends Screen {
 
     @Override
     public void render(DrawContext c, int mx, int my, float delta) {
+        hits.clear();
         renderBackground(c, mx, my, delta);
 
         float a = progress();
@@ -269,8 +166,7 @@ public class BlackMenuScreen extends Screen {
 
         float s = scale();
         double ux = lx(mx), uy = ly(my);
-        int x = px(), y = py(), h = panelH();
-        List<Row> rows = pages.get(page);
+        int x = px(), y = py();
 
         MatrixStack ms = c.getMatrices();
         ms.push();
@@ -278,105 +174,264 @@ public class BlackMenuScreen extends Screen {
         ms.scale(s, s, 1f);
         ms.translate(-width / 2f, -height / 2f, 0f);
 
-        rrect(c, x - 1, y - 1, W + 2, h + 2, R + 1, argb(0x262626, a));
-        rrect(c, x, y, W, h, R, argb(0x050505, a));
+        rrect(c, x - 1, y - 1, W + 2, H + 2, R + 1, argb(0x1C1C24, a));
+        rrect(c, x, y, W, H, R, argb(0x07070B, a));
 
-        if (a > 0.05f) {
-            if (page == Page.MAIN) {
-                c.drawText(textRenderer, Text.literal("BLACK MENU").formatted(Formatting.BOLD),
-                        x + PAD, y + 14, argb(0xFFFFFF, a), false);
-                c.drawText(textRenderer, "RIGHT SHIFT", x + PAD, y + 27, argb(0x555555, a), false);
-            } else {
-                boolean hb = inside(ux, uy, x, y, W, HEAD - 8);
-                c.drawText(textRenderer, Text.literal("< " + page.title).formatted(Formatting.BOLD),
-                        x + PAD, y + 14, argb(hb ? 0xFFFFFF : 0xBBBBBB, a), false);
-                c.drawText(textRenderer, "BACK", x + PAD, y + 27, argb(0x555555, a), false);
-            }
-        }
-        c.fill(x + PAD, y + HEAD - 8, x + W - PAD, y + HEAD - 7, argb(0x1C1C1C, a));
-
-        for (int i = 0; i < rows.size(); i++) {
-            drawRow(c, rows.get(i), x, y + HEAD + i * ROW, a, dt, ux, uy);
-        }
+        drawSidebar(c, x, y, a, ux, uy);
+        drawTop(c, x, y, a, ux, uy);
+        drawCards(c, x, y, a, dt, ux, uy, s);
+        drawDropdown(c, y, a, ux, uy);
 
         ms.pop();
     }
 
-    private void drawRow(DrawContext c, Row r, int x, int ry, float a, float dt, double ux, double uy) {
-        boolean rowHover = inside(ux, uy, x, ry, W, ROW);
-        if (rowHover) rrect(c, x + 6, ry + 1, W - 12, ROW - 2, 6, argb(0x101010, a));
-        int ty = ry + (ROW - 8) / 2;
+    private void sideItem(DrawContext c, int x, int ry, String label, boolean selected, float a,
+                          double ux, double uy, Runnable click) {
+        boolean hv = inside(ux, uy, x + 8, ry, SIDE - 16, 20);
+        if (selected) rrect(c, x + 8, ry, SIDE - 16, 20, 6, argb(0x14141B, a));
+        else if (hv) rrect(c, x + 8, ry, SIDE - 16, 20, 6, argb(0x0D0D12, a));
+        if (selected) rrect(c, x + 8, ry + 5, 2, 10, 1, argb(0xFFFFFF, a));
+        if (a > 0.05f) {
+            c.drawText(textRenderer, Mods.tr(label), x + 18, ry + 6,
+                    argb(selected ? 0xFFFFFF : (hv ? 0xCCCCCC : 0x777782), a), false);
+        }
+        add(x + 8, ry, SIDE - 16, 20, false, click, null, null);
+    }
 
-        switch (r.kind) {
-            case TOGGLE -> {
-                float target = r.getB.getAsBoolean() ? 1f : 0f;
-                r.anim += (target - r.anim) * Math.min(1f, dt * 16f);
-                float t = r.anim;
+    private void drawSidebar(DrawContext c, int x, int y, float a, double ux, double uy) {
+        rrect(c, x, y, SIDE, H, R, argb(0x040407, a));
+        c.fill(x + SIDE - R, y, x + SIDE, y + H, argb(0x040407, a));
+        c.fill(x + SIDE, y + 8, x + SIDE + 1, y + H - 8, argb(0x15151C, a));
+
+        rrect(c, x + 12, y + 12, 12, 12, 4, argb(0xFFFFFF, a));
+        c.fill(x + 17, y + 14, x + 19, y + 22, argb(0x000000, a));
+        c.fill(x + 14, y + 17, x + 22, y + 19, argb(0x000000, a));
+        if (a > 0.05f) {
+            c.drawText(textRenderer, Text.literal("BLACK").formatted(Formatting.BOLD), x + 30, y + 14, argb(0xFFFFFF, a), false);
+            small(c, Mods.tr("Categories|Категории"), x + 12, y + 38, argb(0x555560, a), 0.75f);
+        }
+
+        for (int i = 0; i < SIDE_CATS.length; i++) {
+            final Mods.Cat k = SIDE_CATS[i];
+            sideItem(c, x, y + 50 + i * 22, k == null ? "All|Все" : k.name, cat == k, a, ux, uy, () -> {
+                cat = k;
+                scroll = scrollTarget = 0;
+            });
+        }
+
+        sideItem(c, x, y + H - 62, Mods.Cat.SETTINGS.name, cat == Mods.Cat.SETTINGS, a, ux, uy, () -> {
+            cat = Mods.Cat.SETTINGS;
+            scroll = scrollTarget = 0;
+        });
+
+        c.fill(x + 12, y + H - 34, x + SIDE - 12, y + H - 33, argb(0x15151C, a));
+        if (a > 0.05f) {
+            String user = client != null ? client.getSession().getUsername() : "";
+            c.drawText(textRenderer, textRenderer.trimToWidth(user, SIDE - 24), x + 12, y + H - 28, argb(0xDDDDDD, a), false);
+            small(c, "Black Menu 1.21.1", x + 12, y + H - 16, argb(0x555560, a), 0.75f);
+        }
+    }
+
+    private void drawTop(DrawContext c, int x, int y, float a, double ux, double uy) {
+        int cx0 = x + SIDE + 8, cx1 = x + W - 8;
+        String title = !query.isEmpty() ? Mods.tr("Search|Поиск") : (cat == null ? Mods.tr("All|Все") : Mods.tr(cat.name));
+        if (a > 0.05f) {
+            c.drawText(textRenderer, Text.literal(title).formatted(Formatting.BOLD), cx0 + 2, y + 14, argb(0xFFFFFF, a), false);
+        }
+
+        int sw = 150, sx = cx1 - 48 - 8 - sw;
+        rrect(c, sx - 1, y + 7, sw + 2, 20, 6, argb(searchFocus ? 0x6A6A78 : 0x1A1A22, a));
+        rrect(c, sx, y + 8, sw, 18, 5, argb(0x0D0D12, a));
+        if (a > 0.05f) {
+            if (query.isEmpty() && !searchFocus) {
+                c.drawText(textRenderer, Mods.tr("Search modules...|Поиск модулей..."), sx + 8, y + 14, argb(0x555560, a), false);
+            } else {
+                String t = query + (searchFocus && (System.currentTimeMillis() / 500) % 2 == 0 ? "_" : "");
+                c.drawText(textRenderer, textRenderer.trimToWidth(t, sw - 14), sx + 8, y + 14, argb(0xFFFFFF, a), false);
+            }
+        }
+        add(sx, y + 8, sw, 18, false, () -> searchFocus = true, null, null);
+
+        int fx = cx1 - 48;
+        boolean fh = inside(ux, uy, fx, y + 8, 14, 18);
+        if (a > 0.05f) small(c, "*", fx + 2, y + 10, argb(favOnly ? 0xFFC94A : (fh ? 0xAAAAAA : 0x555560), a), 1.8f);
+        add(fx, y + 8, 14, 18, false, () -> {
+            favOnly = !favOnly;
+            scroll = scrollTarget = 0;
+        }, null, null);
+
+        int lx = cx1 - 28;
+        boolean lh = inside(ux, uy, lx, y + 8, 28, 18);
+        rrect(c, lx, y + 8, 28, 18, 5, argb(lh ? 0x1E1E28 : 0x101016, a));
+        if (a > 0.05f) {
+            String l = Cfg.lang == 0 ? "RU" : "EN";
+            c.drawText(textRenderer, l, lx + (28 - textRenderer.getWidth(l)) / 2, y + 14, argb(0xFFFFFF, a), false);
+        }
+        add(lx, y + 8, 28, 18, false, () -> Cfg.lang = Cfg.lang == 0 ? 1 : 0, null, null);
+
+        c.fill(cx0, y + 34, cx1, y + 35, argb(0x15151C, a));
+    }
+
+    private void drawCards(DrawContext c, int x, int y, float a, float dt, double ux, double uy, float s) {
+        int cx0 = x + SIDE + 8, cx1 = x + W - 8;
+        cy0 = y + 40;
+        cy1 = y + H - 8;
+        int colW = (cx1 - cx0 - 2 * GAP) / 3;
+
+        scrollTarget = Math.max(0, Math.min(scrollTarget, maxScroll));
+        scroll += (scrollTarget - scroll) * Math.min(1f, dt * 14f);
+        int off = Math.round(scroll);
+
+        int sx1 = (int) Math.floor((cx0 - 2 - width / 2f) * s + width / 2f);
+        int sx2 = (int) Math.ceil((cx1 + 2 - width / 2f) * s + width / 2f);
+        int sy1 = (int) Math.floor((cy0 - height / 2f) * s + height / 2f);
+        int sy2 = (int) Math.ceil((cy1 - height / 2f) * s + height / 2f);
+        c.enableScissor(sx1, sy1, sx2, sy2);
+
+        List<Mods.Mod> list = visible();
+        int[] colY = new int[3];
+        for (Mods.Mod m : list) {
+            int col = 0;
+            for (int k = 1; k < 3; k++) if (colY[k] < colY[col]) col = k;
+            int cx = cx0 + col * (colW + GAP);
+            int cyy = cy0 - off + colY[col];
+            int ch = cardH(m);
+            if (cyy + ch >= cy0 && cyy <= cy1) drawCard(c, m, cx, cyy, colW, ch, a, dt, ux, uy);
+            colY[col] += ch + GAP;
+        }
+        int total = Math.max(colY[0], Math.max(colY[1], colY[2])) - GAP;
+        maxScroll = Math.max(0, total - (cy1 - cy0));
+
+        c.disableScissor();
+
+        if (list.isEmpty() && a > 0.05f) {
+            String t = Mods.tr("Nothing found|Ничего не найдено");
+            c.drawText(textRenderer, t, cx0 + (cx1 - cx0 - textRenderer.getWidth(t)) / 2, cy0 + 40, argb(0x555560, a), false);
+        }
+    }
+
+    private void drawCard(DrawContext c, Mods.Mod m, int x, int y, int w, int h, float a, float dt, double ux, double uy) {
+        rrect(c, x - 1, y - 1, w + 2, h + 2, 8, argb(0x17171E, a));
+        rrect(c, x, y, w, h, 7, argb(0x0C0C11, a));
+
+        boolean hasToggle = m.on != null;
+        boolean on = hasToggle && m.on.getAsBoolean();
+        if (hasToggle) m.anim += ((on ? 1f : 0f) - m.anim) * Math.min(1f, dt * 16f);
+        else m.anim = 1f;
+
+        int tx = x + w - 8 - 22;
+        int starX = (hasToggle ? tx : x + w - 8) - 14;
+        if (a > 0.05f) {
+            String nm = textRenderer.trimToWidth(Mods.tr(m.name), starX - (x + 8) - 2);
+            c.drawText(textRenderer, nm, x + 8, y + 8, argb(mix(0x9A9AA5, 0xFFFFFF, m.anim), a), false);
+            small(c, "*", starX + 2, y + 6, argb(Mods.isFav(m) ? 0xFFC94A : 0x444450, a), 1.5f);
+        }
+        if (hasToggle) {
+            rrect(c, tx - 1, y + 5, 24, 14, 7, argb(mix(0x2A2A32, 0xFFFFFF, m.anim), a));
+            rrect(c, tx, y + 6, 22, 12, 6, argb(mix(0x0F0F14, 0xFFFFFF, m.anim), a));
+            rrect(c, tx + 2 + (int) (10 * m.anim), y + 8, 8, 8, 4, argb(mix(0x5A5A66, 0x000000, m.anim), a));
+            add(x + 4, y + 2, Math.max(8, starX - x - 6), 20, true, () -> m.setOn.accept(!m.on.getAsBoolean()), null, null);
+            add(tx - 2, y + 4, 26, 16, true, () -> m.setOn.accept(!m.on.getAsBoolean()), null, null);
+        }
+        add(starX, y + 4, 12, 16, true, () -> Mods.toggleFav(m), null, null);
+
+        int sy = y + HEAD_H;
+        for (Mods.Set s : m.sets) {
+            drawSet(c, s, x, sy, w, a, dt, ux, uy);
+            sy += setH(s);
+        }
+    }
+
+    private void drawSet(DrawContext c, Mods.Set s, int x, int y, int w, float a, float dt, double ux, double uy) {
+        String nm = Mods.tr(s.name), ds = Mods.tr(s.desc);
+        int lx = x + 8, rw = w - 16;
+        int nameMax = rw - 26;
+        String dsT = textRenderer.trimToWidth(ds, (int) (nameMax / 0.7f));
+
+        switch (s.kind) {
+            case BOOL -> {
+                boolean v = s.getB.getAsBoolean();
+                s.anim += ((v ? 1f : 0f) - s.anim) * Math.min(1f, dt * 16f);
+                int bx = x + w - 8 - 12, by = y + 5;
+                rrect(c, bx - 1, by - 1, 14, 14, 4, argb(mix(0x2A2A32, 0xFFFFFF, s.anim), a));
+                rrect(c, bx, by, 12, 12, 3, argb(mix(0x0F0F14, 0xFFFFFF, s.anim), a));
+                if (s.anim > 0.5f) {
+                    int k = argb(0x000000, a);
+                    c.fill(bx + 3, by + 6, bx + 4, by + 8, k);
+                    c.fill(bx + 4, by + 7, bx + 5, by + 9, k);
+                    c.fill(bx + 5, by + 6, bx + 6, by + 8, k);
+                    c.fill(bx + 6, by + 5, bx + 7, by + 7, k);
+                    c.fill(bx + 7, by + 4, bx + 8, by + 6, k);
+                    c.fill(bx + 8, by + 3, bx + 9, by + 5, k);
+                }
                 if (a > 0.05f) {
-                    c.drawText(textRenderer, r.name, x + PAD, ty, argb(mix(0x8A8A8A, 0xFFFFFF, t), a), false);
+                    c.drawText(textRenderer, textRenderer.trimToWidth(nm, nameMax), lx, y + 3, argb(mix(0x8A8A95, 0xFFFFFF, s.anim), a), false);
+                    small(c, dsT, lx, y + 13, argb(0x555560, a), 0.7f);
                 }
-                int sx = x + W - PAD - 28, sy = ry + (ROW - 14) / 2;
-                rrect(c, sx - 1, sy - 1, 30, 16, 8, argb(mix(0x2A2A2A, 0xFFFFFF, t), a));
-                rrect(c, sx, sy, 28, 14, 7, argb(mix(0x0F0F0F, 0xFFFFFF, t), a));
-                int kx = sx + 3 + (int) (14 * t);
-                rrect(c, kx, sy + 3, 8, 8, 4, argb(mix(0x5A5A5A, 0x000000, t), a));
-                if (r.link != null && a > 0.05f) {
-                    boolean hv = inside(ux, uy, sx - 24, ry, 20, ROW);
-                    c.drawText(textRenderer, ">", sx - 18, ty, argb(hv ? 0xFFFFFF : 0x666666, a), false);
-                }
+                add(x + 2, y, w - 4, BOOL_H, true, () -> s.setB.accept(!s.getB.getAsBoolean()), null, null);
             }
             case SLIDER -> {
-                float v = r.getF.get();
-                float f = Math.max(0f, Math.min(1f, (v - r.min) / (r.max - r.min)));
+                float v = s.pending != null ? s.pending : s.getF.get();
+                float f = Math.max(0f, Math.min(1f, (v - s.min) / (s.max - s.min)));
+                String val = s.max >= 10 ? String.format("%.0f", v) : String.format("%.1f", v);
+                int bx = x + 8, bw = w - 16, by = y + 23;
                 if (a > 0.05f) {
-                    c.drawText(textRenderer, r.name, x + PAD, ty, argb(0x8A8A8A, a), false);
-                    String txt = String.format("%.1f", v);
-                    c.drawText(textRenderer, txt, x + W - PAD - textRenderer.getWidth(txt), ty,
-                            argb(0xCCCCCC, a), false);
+                    c.drawText(textRenderer, textRenderer.trimToWidth(nm, nameMax - 6), lx, y + 3, argb(0xCCCCD5, a), false);
+                    c.drawText(textRenderer, val, x + w - 8 - textRenderer.getWidth(val), y + 3, argb(0xFFFFFF, a), false);
+                    small(c, dsT, lx, y + 13, argb(0x555560, a), 0.7f);
                 }
-                int tx = sliderX(x), tyy = ry + ROW / 2 - 2;
-                rrect(c, tx, tyy, SW, 4, 2, argb(0x1E1E1E, a));
-                rrect(c, tx, tyy, Math.max(4, (int) (SW * f)), 4, 2, argb(0xFFFFFF, a));
-                rrect(c, tx + (int) ((SW - 8) * f), tyy - 2, 8, 8, 4, argb(0xFFFFFF, a));
+                rrect(c, bx, by, bw, 3, 1, argb(0x20202A, a));
+                rrect(c, bx, by, Math.max(3, (int) (bw * f)), 3, 1, argb(0xFFFFFF, a));
+                rrect(c, bx + (int) ((bw - 6) * f), by - 2, 6, 7, 3, argb(0xFFFFFF, a));
+                add(bx - 3, y + 17, bw + 6, 13, true, null, ux2 -> setSlider(s, ux2, bx, bw), s);
             }
-            case CHOICE -> {
-                int n = r.opts.length;
-                String txt = r.opts[Math.floorMod(r.getI.getAsInt(), n)];
-                int pxl = x + W - PAD - PILL;
-                boolean hv = inside(ux, uy, pxl, ry + 3, PILL, ROW - 6);
-                if (a > 0.05f) c.drawText(textRenderer, r.name, x + PAD, ty, argb(0x8A8A8A, a), false);
-                rrect(c, pxl, ry + 3, PILL, ROW - 6, 6, argb(hv ? 0x1E1E1E : 0x131313, a));
+            case MODE -> {
+                String cur = Mods.tr(s.opts[Math.floorMod(s.getI.getAsInt(), s.opts.length)]);
+                int bx = x + 8, bw = w - 16, by = y + 19;
+                boolean hv = inside(ux, uy, bx, by, bw, 13);
                 if (a > 0.05f) {
-                    c.drawText(textRenderer, txt, pxl + (PILL - textRenderer.getWidth(txt)) / 2, ty,
-                            argb(0xFFFFFF, a), false);
+                    c.drawText(textRenderer, textRenderer.trimToWidth(nm, nameMax + 20), lx, y + 3, argb(0xCCCCD5, a), false);
+                    small(c, textRenderer.trimToWidth(ds, (int) ((rw) / 0.7f)), lx, y + 12, argb(0x555560, a), 0.7f);
                 }
-            }
-            case LINK -> {
+                rrect(c, bx, by, bw, 13, 4, argb(hv || ddSet == s ? 0x20202A : 0x15151B, a));
                 if (a > 0.05f) {
-                    c.drawText(textRenderer, r.name, x + PAD, ty, argb(rowHover ? 0xFFFFFF : 0xBBBBBB, a), false);
-                    c.drawText(textRenderer, ">", x + W - PAD - 6, ty, argb(rowHover ? 0xFFFFFF : 0x666666, a), false);
+                    c.drawText(textRenderer, textRenderer.trimToWidth(cur, bw - 18), bx + 5, by + 3, argb(0xFFFFFF, a), false);
+                    c.drawText(textRenderer, "v", bx + bw - 10, by + 3, argb(0x666672, a), false);
                 }
-            }
-            case SIZE -> {
-                int plusX = x + W - PAD - 16;
-                int textL = plusX - 6 - 28;
-                int minusX = textL - 6 - 16;
-                int by = ry + 5;
-                if (a > 0.05f) {
-                    c.drawText(textRenderer, r.name, x + PAD, ty, argb(0x8A8A8A, a), false);
-                    String pct = Math.round(Cfg.menuScale * 100) + "%";
-                    c.drawText(textRenderer, pct, textL + (28 - textRenderer.getWidth(pct)) / 2, ty,
-                            argb(0xCCCCCC, a), false);
+                if (ddSet == s) {
+                    ddX = bx;
+                    ddY = by + 14;
+                    ddW = bw;
                 }
-                boolean hMinus = inside(ux, uy, minusX, by, 16, 16);
-                boolean hPlus = inside(ux, uy, plusX, by, 16, 16);
-                rrect(c, minusX, by, 16, 16, 5, argb(hMinus ? 0x2A2A2A : 0x151515, a));
-                rrect(c, plusX, by, 16, 16, 5, argb(hPlus ? 0x2A2A2A : 0x151515, a));
-                int sym = argb(0xFFFFFF, a);
-                c.fill(minusX + 4, by + 7, minusX + 12, by + 9, sym);
-                c.fill(plusX + 4, by + 7, plusX + 12, by + 9, sym);
-                c.fill(plusX + 7, by + 4, plusX + 9, by + 12, sym);
+                add(bx, by, bw, 13, true, () -> ddSet = (ddSet == s ? null : s), null, null);
             }
+        }
+    }
+
+    private void drawDropdown(DrawContext c, int y, float a, double ux, double uy) {
+        if (ddSet == null) return;
+        Mods.Set s = ddSet;
+        int n = s.opts.length, oh = 13;
+        int total = n * oh + 4;
+        int dy = ddY;
+        if (dy + total > y + H - 4) dy = ddY - 14 - total;
+
+        rrect(c, ddX - 1, dy - 1, ddW + 2, total + 2, 6, argb(0x2A2A34, a));
+        rrect(c, ddX, dy, ddW, total, 5, argb(0x101016, a));
+        add(ddX, dy, ddW, total, false, () -> { }, null, null);
+
+        int cur = Math.floorMod(s.getI.getAsInt(), n);
+        for (int i = 0; i < n; i++) {
+            int oy = dy + 2 + i * oh;
+            boolean hv = inside(ux, uy, ddX + 2, oy, ddW - 4, oh);
+            if (hv) rrect(c, ddX + 2, oy, ddW - 4, oh, 4, argb(0x1E1E28, a));
+            String t = textRenderer.trimToWidth(Mods.tr(s.opts[i]), ddW - 12);
+            c.drawText(textRenderer, t, ddX + 6, oy + 3, argb(i == cur ? 0xFFFFFF : (hv ? 0xDDDDDD : 0x8A8A95), a), false);
+            final int idx = i;
+            add(ddX + 2, oy, ddW - 4, oh, false, () -> {
+                s.setI.accept(idx);
+                ddSet = null;
+            }, null, null);
         }
     }
 
@@ -385,59 +440,32 @@ public class BlackMenuScreen extends Screen {
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         double ux = lx(mx), uy = ly(my);
-        int x = px(), y = py();
-
-        if (page != Page.MAIN && button == 0 && inside(ux, uy, x, y, W, HEAD - 8)) {
-            go(page.parent);
-            return true;
-        }
-
-        List<Row> rows = pages.get(page);
-        for (int i = 0; i < rows.size(); i++) {
-            int ry = y + HEAD + i * ROW;
-            if (!inside(ux, uy, x, ry, W, ROW)) continue;
-            click(rows.get(i), x, ry, ux, uy, button);
-            return true;
-        }
-        return super.mouseClicked(mx, my, button);
-    }
-
-    private void click(Row r, int x, int ry, double ux, double uy, int button) {
-        switch (r.kind) {
-            case TOGGLE -> {
-                if (button != 0) return;
-                int sx = x + W - PAD - 28;
-                if (r.link != null && inside(ux, uy, sx - 24, ry, 20, ROW)) go(r.link);
-                else r.setB.accept(!r.getB.getAsBoolean());
-            }
-            case SLIDER -> {
-                if (button == 0 && inside(ux, uy, sliderX(x) - 6, ry, SW + 12, ROW)) {
-                    dragging = r;
-                    setSlider(r, ux, x);
+        Mods.Set open = ddSet;
+        for (int i = hits.size() - 1; i >= 0; i--) {
+            Hit h = hits.get(i);
+            if (!inside(ux, uy, h.x, h.y, h.w, h.h)) continue;
+            if (h.clipped && (uy < cy0 || uy >= cy1)) continue;
+            searchFocus = false;
+            if (button == 0) {
+                if (h.drag != null) {
+                    dragHit = h;
+                    dragSet = h.set;
+                    h.drag.accept(ux);
                 }
+                if (h.click != null) h.click.run();
             }
-            case CHOICE -> {
-                int n = r.opts.length;
-                int i = Math.floorMod(r.getI.getAsInt(), n);
-                r.setI.accept(Math.floorMod(i + (button == 1 ? -1 : 1), n));
-            }
-            case LINK -> {
-                if (button == 0) go(r.link);
-            }
-            case SIZE -> {
-                if (button != 0) return;
-                int plusX = x + W - PAD - 16;
-                int minusX = plusX - 6 - 28 - 6 - 16;
-                if (inside(ux, uy, minusX, ry + 5, 16, 16)) changeScale(-0.1f);
-                else if (inside(ux, uy, plusX, ry + 5, 16, 16)) changeScale(0.1f);
-            }
+            if (open != null && ddSet == open) ddSet = null;
+            return true;
         }
+        searchFocus = false;
+        if (open != null) ddSet = null;
+        return super.mouseClicked(mx, my, button);
     }
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
-        if (dragging != null) {
-            setSlider(dragging, lx(mx), px());
+        if (dragHit != null && dragHit.drag != null) {
+            dragHit.drag.accept(lx(mx));
             return true;
         }
         return super.mouseDragged(mx, my, button, dx, dy);
@@ -445,24 +473,53 @@ public class BlackMenuScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
-        dragging = null;
+        if (dragSet != null && dragSet.pending != null) {
+            dragSet.setF.accept(dragSet.pending);
+            dragSet.pending = null;
+        }
+        dragHit = null;
+        dragSet = null;
         return super.mouseReleased(mx, my, button);
     }
 
     @Override
     public boolean mouseScrolled(double mx, double my, double horizontal, double vertical) {
-        changeScale((float) (vertical * 0.05));
+        if (hasControlDown()) {
+            float v = Math.max(0.6f, Math.min(1.5f, Cfg.menuScale + (float) (vertical * 0.05)));
+            Cfg.menuScale = Math.round(v * 20f) / 20f;
+        } else {
+            scrollTarget = Math.max(0, Math.min(maxScroll, scrollTarget - (float) vertical * 28f));
+        }
         return true;
     }
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (keyCode == GLFW.GLFW_KEY_RIGHT_SHIFT) {
-            close();
+    public boolean charTyped(char chr, int modifiers) {
+        if (searchFocus && chr >= 32 && chr != 127 && query.length() < 20) {
+            query += chr;
+            scroll = scrollTarget = 0;
             return true;
         }
-        if (keyCode == GLFW.GLFW_KEY_BACKSPACE && page != Page.MAIN) {
-            go(page.parent);
+        return super.charTyped(chr, modifiers);
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            if (ddSet != null) { ddSet = null; return true; }
+            if (searchFocus) { searchFocus = false; return true; }
+        }
+        if (searchFocus) {
+            if (keyCode == GLFW.GLFW_KEY_BACKSPACE && !query.isEmpty()) {
+                query = query.substring(0, query.length() - 1);
+                scroll = scrollTarget = 0;
+            } else if (keyCode == GLFW.GLFW_KEY_ENTER) {
+                searchFocus = false;
+            }
+            return true;   // keep typing from triggering other shortcuts
+        }
+        if (keyCode == GLFW.GLFW_KEY_RIGHT_SHIFT) {
+            close();
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);

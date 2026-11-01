@@ -2,13 +2,14 @@ package com.blackmenu;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Random;
 
-/** Smooth glowing effects around the player / animal / mob you are aiming at. */
+/** Smooth glowing effects around the player / animal / mob you are aiming at. Modes: see Mods.ESP. */
 final class TargetEsp {
     private static Entity cur;
     private static float fade;
@@ -32,20 +33,43 @@ final class TargetEsp {
         return cur;
     }
 
+    private static float[] col(Entity e, double phase) {
+        float[] c = Gfx.pal(Cfg.espColor, phase);
+        if (Cfg.espFlash && e instanceof LivingEntity le && le.hurtTime > 0) {
+            float f = Math.min(1f, le.hurtTime / 6f);
+            return new float[]{c[0] + (1f - c[0]) * f, c[1] * (1 - f) + 0.15f * f, c[2] * (1 - f) + 0.15f * f};
+        }
+        return c;
+    }
+
     static void draw(Entity e, Vec3d cam, double t, float td) {
         Vec3d p = e.getLerpedPos(td);
         double bx = p.x - cam.x, by = p.y - cam.y, bz = p.z - cam.z;
-        double h = e.getHeight();
-        double sz = Cfg.espSize;
+        double h = e.getHeight(), sz = Cfg.espSize;
         double rw = e.getWidth() * 0.5 + 0.22 * sz;
         double tt = t * Cfg.espSpeed;
         float a = Cfg.espAlpha * fade;
 
-        if (Cfg.espLightning) lightning(e, bx, by, bz, h, rw, sz, tt, a);
-        if (Cfg.espCircle) circle(bx, by, bz, h, rw, sz, tt, a);
-        if (Cfg.espChains) chains(bx, by, bz, h, rw, sz, tt, a);
-        if (Cfg.espOrbs) orbs(bx, by, bz, h, rw, sz, tt, a);
+        mode(Cfg.espMode, e, bx, by, bz, h, rw, sz, tt, a);
+        if (Cfg.espMode2 > 0) mode(Cfg.espMode2 - 1, e, bx, by, bz, h, rw, sz, tt, a);
     }
+
+    private static void mode(int m, Entity e, double bx, double by, double bz, double h, double rw,
+                             double sz, double tt, float a) {
+        switch (m) {
+            case 0 -> lightning(e, bx, by, bz, h, rw, sz, tt, a);
+            case 1 -> circle(e, bx, by, bz, h, rw, sz, tt, a);
+            case 2 -> chains(e, bx, by, bz, h, rw, sz, tt, a);
+            case 3 -> orbs(e, bx, by, bz, h, rw, sz, tt, a);
+            case 4 -> crystals(e, bx, by, bz, h, rw, sz, tt, a);
+            case 5 -> halo(e, bx, by, bz, h, sz, tt, a);
+            case 6 -> helix(e, bx, by, bz, h, rw, sz, tt, a);
+            case 7 -> beam(e, bx, by, bz, h, rw, sz, tt, a);
+            default -> runes(e, bx, by, bz, rw, sz, tt, a);
+        }
+    }
+
+    // ------------------------------------------------------------------ modes
 
     private static void lightning(Entity e, double bx, double by, double bz, double h, double rw,
                                   double sz, double tt, float a) {
@@ -81,16 +105,23 @@ final class TargetEsp {
                 double s = q / (double) (pts.length - 1);
                 double taper = Math.sin(Math.PI * s);
                 path.add(pts[q][0], pts[q][1], pts[q][2], Math.pow(taper, 0.6),
-                        env * a * Math.pow(taper, 0.5), Gfx.pal(Cfg.espColor, i * 0.17 + s * 0.2 + tt * 0.05));
+                        env * a * Math.pow(taper, 0.5), col(e, i * 0.17 + s * 0.2 + tt * 0.05));
             }
             Gfx.ribbon(path, false, false, 0.085 * sz, 0.28f, 0f);
             Gfx.ribbon(path, false, false, 0.016 * sz, 1f, 0.7f);
         }
     }
 
-    private static void circle(double bx, double by, double bz, double h, double rw,
+    private static void ringPath(Entity e, Gfx.Path p, double cx, double y, double cz, double r, double a, double tt) {
+        int n = 64;
+        for (int i = 0; i < n; i++) {
+            double ang = Math.PI * 2 * i / n;
+            p.add(cx + Math.cos(ang) * r, y, cz + Math.sin(ang) * r, 1, a, col(e, ang / (Math.PI * 2) + tt * 0.05));
+        }
+    }
+
+    private static void circle(Entity e, double bx, double by, double bz, double h, double rw,
                                double sz, double tt, float a) {
-        // ground ring with a slowly rotating highlight
         double rr = rw * 1.1 + 0.15 * sz;
         int n = 72;
         Gfx.Path ring = new Gfx.Path();
@@ -98,30 +129,23 @@ final class TargetEsp {
             double ang = Math.PI * 2 * i / n;
             double hl = 0.5 + 0.5 * Math.sin(2 * ang - tt * 2.2);
             ring.add(bx + Math.cos(ang) * rr, by + 0.03, bz + Math.sin(ang) * rr, 1,
-                    a * (0.30 + 0.70 * hl), Gfx.pal(Cfg.espColor, ang / (Math.PI * 2) + tt * 0.05));
+                    a * (0.30 + 0.70 * hl), col(e, ang / (Math.PI * 2) + tt * 0.05));
         }
         Gfx.ribbon(ring, true, true, 0.14 * sz, 0.35f, 0f);
         Gfx.ribbon(ring, true, true, 0.03 * sz, 1f, 0.6f);
 
-        // scanner ring gliding up and down the body
         double u = 0.5 + 0.5 * Math.sin(tt * 1.6);
         double env = Math.pow(Math.sin(Math.PI * u), 0.5);
-        double rs = rw * 0.95;
         Gfx.Path sc = new Gfx.Path();
-        for (int i = 0; i < n; i++) {
-            double ang = Math.PI * 2 * i / n;
-            sc.add(bx + Math.cos(ang) * rs, by + h * u, bz + Math.sin(ang) * rs, 1,
-                    a * 0.8 * env, Gfx.pal(Cfg.espColor, ang / (Math.PI * 2) + tt * 0.05));
-        }
+        ringPath(e, sc, bx, by + h * u, bz, rw * 0.95, a * 0.8 * env, tt);
         Gfx.ribbon(sc, true, true, 0.08 * sz, 0.3f, 0f);
         Gfx.ribbon(sc, true, true, 0.015 * sz, 1f, 0.6f);
     }
 
-    private static void chains(double bx, double by, double bz, double h, double rw,
+    private static void chains(Entity e, double bx, double by, double bz, double h, double rw,
                                double sz, double tt, float a) {
         int links = 12;
-        double span = h + 0.2;
-        double turns = Math.PI * 2 * 1.25;
+        double span = h + 0.2, turns = Math.PI * 2 * 1.25;
         for (int c = 0; c < 2; c++) {
             for (int j = 0; j < links; j++) {
                 double s = (j + 0.5) / links;
@@ -129,7 +153,6 @@ final class TargetEsp {
                 double rad = rw + 0.02;
                 double cx = bx + Math.cos(ang) * rad, cy = by + s * span, cz = bz + Math.sin(ang) * rad;
 
-                // tangent T, radial N, binormal B
                 double tx = -Math.sin(ang) * rad * turns, ty = span, tz = Math.cos(ang) * rad * turns;
                 double tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
                 tx /= tl; ty /= tl; tz /= tl;
@@ -138,18 +161,17 @@ final class TargetEsp {
                 double ql = Math.sqrt(qx * qx + qy * qy + qz * qz);
                 qx /= ql; qy /= ql; qz /= ql;
 
-                // every second link is turned 90 degrees so they interlock
-                double ox = (j % 2 == 0) ? nx : qx, oy = (j % 2 == 0) ? ny : qy, oz = (j % 2 == 0) ? nz : qz;
+                boolean even = j % 2 == 0;
+                double ox = even ? nx : qx, oy = even ? ny : qy, oz = even ? nz : qz;
                 double la = 0.09 * sz, lb = 0.05 * sz;
                 double al = a * 0.95 * Math.pow(Math.sin(Math.PI * s), 0.35);
-                float[] col = Gfx.pal(Cfg.espColor, s + c * 0.5 + tt * 0.05);
+                float[] cc = col(e, s + c * 0.5 + tt * 0.05);
 
                 Gfx.Path lk = new Gfx.Path();
                 for (int q = 0; q < 12; q++) {
                     double ph = Math.PI * 2 * q / 12, cs = Math.cos(ph), sn = Math.sin(ph);
-                    lk.add(cx + tx * la * cs + ox * lb * sn,
-                            cy + ty * la * cs + oy * lb * sn,
-                            cz + tz * la * cs + oz * lb * sn, 1, al, col);
+                    lk.add(cx + tx * la * cs + ox * lb * sn, cy + ty * la * cs + oy * lb * sn,
+                            cz + tz * la * cs + oz * lb * sn, 1, al, cc);
                 }
                 Gfx.ribbon(lk, true, false, 0.035 * sz, 0.3f, 0f);
                 Gfx.ribbon(lk, true, false, 0.011 * sz, 1f, 0.6f);
@@ -157,26 +179,133 @@ final class TargetEsp {
         }
     }
 
-    private static void orbs(double bx, double by, double bz, double h, double rw,
+    private static void orbs(Entity e, double bx, double by, double bz, double h, double rw,
                              double sz, double tt, float a) {
-        for (int i = 0; i < 3; i++) {
-            float[] col = Gfx.pal(Cfg.espColor, i / 3.0 + tt * 0.03);
+        int count = Math.max(1, Math.min(12, (int) Cfg.espCount));
+        for (int i = 0; i < count; i++) {
+            float[] cc = col(e, i / (double) count + tt * 0.03);
             Gfx.Path tr = new Gfx.Path();
             double hx = 0, hy = 0, hz = 0;
             int len = 18;
             for (int k = 0; k < len; k++) {
                 double tk = tt - k * 0.035;
-                double ang = i * Math.PI * 2 / 3 + tk * (2.2 + 0.5 * i);
+                double ang = i * Math.PI * 2 / count + tk * (2.2 + 0.3 * (i % 3));
                 double yy = h * (0.2 + 0.6 * (0.5 + 0.5 * Math.sin(tk * 1.3 + i * 2.1)));
                 double rr = rw + 0.04 * sz;
                 double x = bx + Math.cos(ang) * rr, y = by + yy, z = bz + Math.sin(ang) * rr;
                 double f = 1 - k / (double) (len - 1);
-                tr.add(x, y, z, f, a * 0.9 * f * f, col);
+                tr.add(x, y, z, f, a * 0.9 * f * f, cc);
                 if (k == 0) { hx = x; hy = y; hz = z; }
             }
             Gfx.ribbon(tr, false, false, 0.06 * sz, 0.3f, 0f);
             Gfx.ribbon(tr, false, false, 0.016 * sz, 1f, 0.5f);
-            Gfx.disc(hx, hy, hz, 0.22 * sz, col, a * 0.9f);
+            Gfx.disc(hx, hy, hz, 0.22 * sz, cc, a * 0.9f);
+        }
+    }
+
+    private static void crystals(Entity e, double bx, double by, double bz, double h, double rw,
+                                 double sz, double tt, float a) {
+        int count = Math.max(1, Math.min(12, (int) Cfg.espCount));
+        for (int i = 0; i < count; i++) {
+            double ang = tt * 1.3 + i * Math.PI * 2 / count;
+            double rr = rw + 0.15 * sz;
+            double yy = h * (0.5 + 0.35 * Math.sin(tt * 1.1 + i * 1.7));
+            Shapes.crystal(bx + Math.cos(ang) * rr, by + yy, bz + Math.sin(ang) * rr,
+                    0.07 * sz, 0.16 * sz, tt * 2 + i, col(e, i / (double) count + tt * 0.05), a);
+        }
+    }
+
+    private static void halo(Entity e, double bx, double by, double bz, double h, double sz, double tt, float a) {
+        double hy = by + h + 0.22 * sz + Math.sin(tt * 2) * 0.03;
+        double hr = (0.28 + e.getWidth() * 0.15) * sz;
+        double al = a * (0.75 + 0.25 * Math.sin(tt * 3));
+        Gfx.Path ring = new Gfx.Path();
+        int n = 48;
+        for (int i = 0; i < n; i++) {
+            double ang = Math.PI * 2 * i / n;
+            ring.add(bx + Math.cos(ang) * hr, hy, bz + Math.sin(ang) * hr, 1, al, col(e, ang / (Math.PI * 2) + tt * 0.05));
+        }
+        Gfx.ribbon(ring, true, true, 0.09 * sz, 0.35f, 0f);
+        Gfx.ribbon(ring, true, true, 0.02 * sz, 1f, 0.6f);
+        for (int j = 0; j < 4; j++) {
+            double ang = tt * 2 + j * Math.PI / 2;
+            Shapes.dot(bx + Math.cos(ang) * hr, hy, bz + Math.sin(ang) * hr, 0.06 * sz, col(e, j * 0.25), a);
+        }
+    }
+
+    private static void helix(Entity e, double bx, double by, double bz, double h, double rw,
+                              double sz, double tt, float a) {
+        int per = 14;
+        double span = h + 0.2;
+        for (int k = 0; k < per; k++) {
+            double u = ((k / (double) per) + tt * 0.3) % 1.0;
+            double y = u * span;
+            float al = (float) (a * Math.pow(Math.sin(Math.PI * u), 0.6));
+            double[][] pos = new double[2][];
+            for (int s = 0; s < 2; s++) {
+                double ang = y * 7 + s * Math.PI + tt * 2.4;
+                pos[s] = new double[]{bx + Math.cos(ang) * rw, by + y, bz + Math.sin(ang) * rw};
+                Shapes.dot(pos[s][0], pos[s][1], pos[s][2], 0.04 * sz, col(e, u + s * 0.5), al);
+            }
+            if (k % 2 == 0) {
+                float[] cc = col(e, u);
+                Gfx.Path rung = new Gfx.Path();
+                rung.add(pos[0][0], pos[0][1], pos[0][2], 1, al * 0.6, cc);
+                rung.add(pos[1][0], pos[1][1], pos[1][2], 1, al * 0.6, cc);
+                Gfx.ribbon(rung, false, false, 0.03 * sz, 0.3f, 0f);
+                Gfx.ribbon(rung, false, false, 0.008 * sz, 1f, 0.5f);
+            }
+        }
+    }
+
+    private static void beam(Entity e, double bx, double by, double bz, double h, double rw,
+                             double sz, double tt, float a) {
+        int n = 14;
+        double topY = h + 24;
+        Gfx.Path p = new Gfx.Path();
+        for (int i = 0; i < n; i++) {
+            double s = i / (double) (n - 1);
+            p.add(bx, by - 0.1 + s * topY, bz, 1, a * Math.pow(1 - s, 1.2) * 0.9, col(e, s * 0.3 + tt * 0.05));
+        }
+        Gfx.ribbon(p, false, false, 0.35 * sz, 0.22f, 0f);
+        Gfx.ribbon(p, false, false, 0.06 * sz, 1f, 0.6f);
+        for (int r = 0; r < 3; r++) {
+            double u = (tt * 0.5 + r / 3.0) % 1.0;
+            double rad = rw * 0.6 + (0.3 + 0.25 * u) * sz;
+            Gfx.Path ring = new Gfx.Path();
+            ringPath(e, ring, bx, by + u * (h + 3), bz, rad, a * (1 - u) * 0.8, tt);
+            Gfx.ribbon(ring, true, true, 0.06 * sz, 0.3f, 0f);
+            Gfx.ribbon(ring, true, true, 0.015 * sz, 1f, 0.6f);
+        }
+    }
+
+    private static void runes(Entity e, double bx, double by, double bz, double rw, double sz, double tt, float a) {
+        double r1 = rw * 1.25 + 0.4 * sz, r2 = r1 * 0.72, y = by + 0.03;
+        Gfx.Path outer = new Gfx.Path(), inner = new Gfx.Path();
+        ringPath(e, outer, bx, y, bz, r1, a * 0.9, tt);
+        ringPath(e, inner, bx, y, bz, r2, a * 0.7, tt);
+        for (Gfx.Path p : new Gfx.Path[]{outer, inner}) {
+            Gfx.ribbon(p, true, true, 0.1 * sz, 0.3f, 0f);
+            Gfx.ribbon(p, true, true, 0.02 * sz, 1f, 0.6f);
+        }
+        for (int k = 0; k < 12; k++) {
+            double ang = k * Math.PI * 2 / 12 + tt * 0.5;
+            float[] cc = col(e, k / 12.0);
+            Gfx.Path mk = new Gfx.Path();
+            mk.add(bx + Math.cos(ang) * (r2 + 0.05), y, bz + Math.sin(ang) * (r2 + 0.05), 1, a * 0.9, cc);
+            mk.add(bx + Math.cos(ang) * (r1 - 0.05), y, bz + Math.sin(ang) * (r1 - 0.05), 1, a * 0.9, cc);
+            Gfx.ribbon(mk, false, true, 0.05 * sz, 0.3f, 0f);
+            Gfx.ribbon(mk, false, true, 0.012 * sz, 1f, 0.6f);
+        }
+        for (int tri = 0; tri < 2; tri++) {
+            double rot = (tri == 0 ? 1 : -1) * tt * 0.4 + tri * Math.PI / 3;
+            Gfx.Path tp = new Gfx.Path();
+            for (int j = 0; j < 3; j++) {
+                double ang = rot + j * Math.PI * 2 / 3;
+                tp.add(bx + Math.cos(ang) * r2 * 0.95, y, bz + Math.sin(ang) * r2 * 0.95, 1, a * 0.8, col(e, j / 3.0 + tri * 0.5));
+            }
+            Gfx.ribbon(tp, true, true, 0.06 * sz, 0.3f, 0f);
+            Gfx.ribbon(tp, true, true, 0.015 * sz, 1f, 0.6f);
         }
     }
 }

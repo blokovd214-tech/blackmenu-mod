@@ -17,12 +17,8 @@ import net.minecraft.world.World;
 import java.util.ArrayList;
 import java.util.Iterator;
 
-/** World rendering: aurora sky, floating particles, cave dust, hitboxes and target effects as soft additive glow. */
+/** World rendering: aurora, atmosphere particles, weather, dust, kill effects, hitboxes and target effects. */
 public final class Fx {
-    private static final long[] TIMES = {0L, 18000L, 12800L, 23000L, 6000L};
-    public static final String[] TIME_NAMES = {"Server", "Night", "Sunset", "Dawn", "Day"};
-    public static final String[] AURORA_COLORS = {"Green", "Blue", "Violet", "Rainbow"};
-
     static final Motes FLIES = new Motes(false);
     static final Motes DUST = new Motes(true);
 
@@ -33,8 +29,8 @@ public final class Fx {
     /** Called every tick AND every frame, so the sky never flickers back to server time. */
     static void applyTime(MinecraftClient mc) {
         if (!Cfg.atmo || mc.world == null) return;
-        if (Cfg.atmoTime <= 0 || Cfg.atmoTime >= TIMES.length) return;
-        mc.world.setTimeOfDay(TIMES[Cfg.atmoTime]);
+        long t = Atmos.timeFor();
+        if (t >= 0) mc.world.setTimeOfDay(t);
     }
 
     public static void render(WorldRenderContext ctx) {
@@ -43,25 +39,33 @@ public final class Fx {
         MatrixStack ms = ctx.matrixStack();
         if (w == null || mc.player == null || ms == null) return;
 
-        boolean doAur = Cfg.atmo && Cfg.aurora;
-        boolean doFly = Cfg.atmo && Cfg.flies;
-        boolean doDust = Cfg.dust;
-        boolean doHb = Cfg.hb;
+        Atmos.Theme th = Atmos.theme();
+        boolean at = Cfg.atmo;
+        boolean doAur = at && Cfg.aurora && th.aur >= 0;
+        boolean doAtmos = at && (th.kind != null || th.sparkle);
+        boolean doMotes = at && th.motes;
+        boolean doWx = Cfg.wx || (at && th.storm);
+        boolean doDust = Cfg.dust, doHb = Cfg.hb, doKill = KillFx.active();
         Entity target = TargetEsp.pick(mc);
-        if (!doAur && !doFly && !doDust && !doHb && target == null) return;
+        if (!(doAur || doAtmos || doMotes || doWx || doDust || doHb || doKill) && target == null) return;
 
         if (imm == null) imm = VertexConsumerProvider.immediate(new BufferAllocator(1 << 20));
 
         float td = mc.getRenderTickCounter().getTickDelta(false);
         Vec3d cam = ctx.camera().getPos();
         double t = (w.getTime() + td) / 20.0;
+        if (at && th.storm) Atmos.updateStorm(t);
 
         Gfx.m = ms.peek().getPositionMatrix();
         Gfx.vc = imm.getBuffer(RenderLayer.getLightning());
 
-        if (doAur) Aurora.draw(w, t, td);
-        if (doFly) FLIES.draw(cam, td);
+        if (doAur) Aurora.draw(w, t, td, th.aur);
+        if (at && th.storm) Atmos.drawBolt(cam, t);
+        if (doAtmos) Atmos.draw(cam, t);
+        if (doMotes) FLIES.draw(cam, td);
+        if (doWx) Weather.draw(mc, w, cam, t, td);
         if (doDust) DUST.draw(cam, td);
+        if (doKill) KillFx.draw(cam, td);
         if (doHb) Hitboxes.draw(mc, w, cam, t, td);
         if (target != null) TargetEsp.draw(target, cam, t, td);
 
@@ -82,26 +86,27 @@ public final class Fx {
             return k * k * (3 - 2 * k);
         }
 
-        private static float[] color(double v, double s, double t) {
+        private static float[] color(int idx, double v, double s, double t) {
             float[] a, b;
-            switch (Cfg.auroraColor) {
+            switch (idx) {
                 case 0 -> { a = new float[]{0.25f, 1f, 0.55f}; b = new float[]{0.55f, 0.35f, 1f}; }
                 case 1 -> { a = new float[]{0.25f, 0.9f, 1f}; b = new float[]{0.45f, 0.3f, 1f}; }
                 case 2 -> { a = new float[]{0.85f, 0.35f, 1f}; b = new float[]{1f, 0.45f, 0.65f}; }
+                case 4 -> { a = new float[]{1f, 0.2f, 0.25f}; b = new float[]{0.6f, 0.1f, 0.5f}; }
                 default -> { return Gfx.hsv(0.3 + 0.35 * v + s * 0.2 + t * 0.01, 0.7, 1.0); }
             }
             float k = (float) Math.pow(v, 0.8);
             return new float[]{a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k};
         }
 
-        static void draw(ClientWorld w, double t, float td) {
+        static void draw(ClientWorld w, double t, float td, int colorIdx) {
             if (!w.getRegistryKey().equals(World.OVERWORLD)) return;
             double sun = Math.cos(w.getSkyAngle(td) * Math.PI * 2);
             double night = Math.max(0, Math.min(1, (0.30 - sun) / 0.55));
             night *= 1.0 - w.getRainGradient(td);
             if (night < 0.01) return;
 
-            double spd = Cfg.auroraSpeed;
+            double spd = Cfg.atmoSpeed;
             int n = 40, m = 7;
             for (int k = 2; k >= 0; k--) {   // far to near
                 double rho = 240 + 45 * k;
@@ -123,7 +128,7 @@ public final class Fx {
                     for (int j = 0; j < m; j++) {
                         double v = (double) j / (m - 1);
                         double prof = smooth(0, 0.14, v) * Math.pow(1 - v, 1.6);
-                        g[i][j] = new Gfx.V(x, y0 + hh * v, z, color(v, s, t), (float) (base * prof));
+                        g[i][j] = new Gfx.V(x, y0 + hh * v, z, color(colorIdx, v, s, t), (float) (base * prof));
                     }
                 }
                 for (int i = 0; i < n - 1; i++) {
@@ -152,7 +157,7 @@ public final class Fx {
         }
 
         private boolean enabled() {
-            return dust ? Cfg.dust : (Cfg.atmo && Cfg.flies);
+            return dust ? Cfg.dust : (Cfg.atmo && Atmos.theme().motes);
         }
 
         void tick(MinecraftClient mc) {
@@ -163,8 +168,8 @@ public final class Fx {
             ClientWorld w = mc.world;
             BlockPos pp = mc.player.getBlockPos();
             boolean canSpawn = !dust || w.getLightLevel(LightType.SKY, pp) <= 4;   // dust only in caves / indoors
-            int target = (int) (dust ? 130 * Cfg.dustAmount : 110 * Cfg.fliesAmount);
-            double sp = dust ? Cfg.dustSpeed : Cfg.fliesSpeed;
+            int target = (int) (dust ? 130 * Cfg.dustAmount : 110 * Cfg.atmoDensity);
+            double sp = dust ? Cfg.dustSpeed : Cfg.atmoSpeed;
 
             for (int i = 0; canSpawn && i < 3 && list.size() < target; i++) {
                 double ang = Math.random() * Math.PI * 2;
@@ -230,8 +235,8 @@ public final class Fx {
                 } else {
                     double twinkle = 0.75 + 0.25 * Math.sin(f.age * 0.09 + f.seed);
                     al = (float) (fade * twinkle * 0.9);
-                    rad = 0.16 * Cfg.fliesSize * f.sz;
-                    col = Gfx.pal(Cfg.fliesColor, f.seed / (Math.PI * 2));
+                    rad = 0.16 * Cfg.atmoSize * f.sz;
+                    col = Gfx.pal(Atmos.theme().motesColor, f.seed / (Math.PI * 2));
                 }
                 Gfx.disc(f.ix - cam.x, f.iy - cam.y, f.iz - cam.z, rad, col, al);
             }

@@ -44,8 +44,10 @@ public class BlackMenuClient implements ClientModInitializer {
             }
 
             Fx.applyTime(mc);
+            Weather.tick(mc);
             Fx.FLIES.tick(mc);
             Fx.DUST.tick(mc);
+            KillFx.tick(mc);
         });
 
         HudRenderCallback.EVENT.register((ctx, tick) -> CustomHud.render(ctx, MinecraftClient.getInstance()));

@@ -16,6 +16,8 @@ public final class Cfg {
     // general
     public static boolean fullbright, titleChains = true;
     public static float menuScale = 1f;
+    public static int lang = 0;                 // 0 = RU, 1 = EN
+    public static String favs = "";
 
     // blur+
     public static boolean blurMenu = true;
@@ -37,16 +39,25 @@ public final class Cfg {
     public static int hbColor = 0;
     public static float hbWidth = 1f, hbAlpha = 1f;
 
-    // target esp
-    public static boolean esp, espLightning = true, espCircle = true, espChains, espOrbs;
-    public static int espColor = 0;
-    public static float espSize = 1f, espSpeed = 1f, espAlpha = 1f;
+    // target highlight
+    public static boolean esp, espFlash = true;
+    public static int espMode = 4, espMode2 = 0, espColor = 0;
+    public static float espSize = 1f, espSpeed = 1f, espCount = 6f, espAlpha = 1f;
 
     // atmosphere
-    public static boolean atmo, aurora = true, flies = true;
-    public static int atmoTime = 1, auroraColor = 0, fliesColor = 5;
-    public static float auroraGlow = 1f, auroraSpeed = 1f;
-    public static float fliesAmount = 1f, fliesSize = 1f, fliesSpeed = 1f;
+    public static boolean atmo, aurora = true;
+    public static int atmoMode = 1, atmoTime = 0;
+    public static float atmoDensity = 1f, atmoSize = 1f, atmoSpeed = 1f, atmoWind = 1f, auroraGlow = 1f;
+
+    // weather and wet floor
+    public static boolean wx, wxPuddles = true, wxRipples = true;
+    public static int wxMode = 0;
+    public static float wxDensity = 1f, wxRadius = 16f, wxHeight = 24f, wxSize = 1f, wxShine = 1f;
+
+    // kill effect
+    public static boolean kfx;
+    public static int kfxMode = 0;
+    public static float kfxPower = 1f, kfxSize = 1f;
 
     // cave dust
     public static boolean dust;
@@ -76,6 +87,7 @@ public final class Cfg {
                 if (f.getType() == boolean.class) f.setBoolean(null, Boolean.parseBoolean(v));
                 else if (f.getType() == int.class) f.setInt(null, Integer.parseInt(v));
                 else if (f.getType() == float.class) f.setFloat(null, Float.parseFloat(v));
+                else if (f.getType() == String.class) f.set(null, v);
             } catch (Exception ignored) {
             }
         }
