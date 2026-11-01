@@ -15,6 +15,7 @@ import java.util.Properties;
 public final class Cfg {
     // general
     public static boolean fullbright, titleChains = true;
+    public static int titleStyle = 0;           // 0 = helix, 1 = chains
     public static float menuScale = 1f;
     public static int lang = 0;                 // 0 = RU, 1 = EN
     public static String favs = "";

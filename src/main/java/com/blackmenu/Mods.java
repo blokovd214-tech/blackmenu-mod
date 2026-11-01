@@ -60,6 +60,7 @@ final class Mods {
     static final String[] TIMES = {"Auto|Авто", "Server|Сервер", "Night|Ночь", "Sunset|Закат", "Dawn|Рассвет", "Day|День"};
     static final String[] WX = {"Rain|Дождь", "Wet floor|Мокрый пол", "Drizzle|Морось"};
     static final String[] KFX = {"Blood|Кровь", "Lightning|Молния", "Souls|Души"};
+    static final String[] TITLE_STYLES = {"Helix|Спираль", "Chains|Цепи"};
 
     private Mods() {}
 
@@ -214,7 +215,9 @@ final class Mods {
         Set sz = slider(m, "Menu size|Размер меню", "Applied when you let go|Применяется после отпускания", 0.6f, 1.5f,
                 () -> Cfg.menuScale, v -> Cfg.menuScale = v);
         sz.deferred = true;
-        bool(m, "Chain title|Стартовый экран", "Chain main menu on launch|Главное меню на цепях при запуске",
+        bool(m, "Custom title|Своё главное меню", "Replace the vanilla title screen|Заменить стандартное главное меню",
                 () -> Cfg.titleChains, v -> Cfg.titleChains = v);
+        mode(m, "Title style|Стиль меню", "Look of the main menu|Вид главного меню", TITLE_STYLES,
+                () -> Cfg.titleStyle, v -> Cfg.titleStyle = v);
     }
 }

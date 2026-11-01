@@ -28,7 +28,7 @@ public class BlackMenuClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
             if (Cfg.titleChains && mc.currentScreen instanceof TitleScreen) {
-                mc.setScreen(new ChainTitleScreen());
+                mc.setScreen(Cfg.titleStyle == 0 ? new HelixTitleScreen() : new ChainTitleScreen());
             }
 
             while (openKey.wasPressed()) {
