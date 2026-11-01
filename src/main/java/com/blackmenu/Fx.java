@@ -9,17 +9,22 @@ import net.minecraft.client.util.BufferAllocator;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.LightType;
 import net.minecraft.world.World;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 
-/** World rendering: aurora sky, smooth flying particles and target effects, drawn as soft additive glow. */
+/** World rendering: aurora sky, floating particles, cave dust, hitboxes and target effects as soft additive glow. */
 public final class Fx {
     private static final long[] TIMES = {0L, 18000L, 12800L, 23000L, 6000L};
     public static final String[] TIME_NAMES = {"Server", "Night", "Sunset", "Dawn", "Day"};
     public static final String[] AURORA_COLORS = {"Green", "Blue", "Violet", "Rainbow"};
+
+    static final Motes FLIES = new Motes(false);
+    static final Motes DUST = new Motes(true);
 
     private static VertexConsumerProvider.Immediate imm;
 
@@ -40,8 +45,10 @@ public final class Fx {
 
         boolean doAur = Cfg.atmo && Cfg.aurora;
         boolean doFly = Cfg.atmo && Cfg.flies;
+        boolean doDust = Cfg.dust;
+        boolean doHb = Cfg.hb;
         Entity target = TargetEsp.pick(mc);
-        if (!doAur && !doFly && target == null) return;
+        if (!doAur && !doFly && !doDust && !doHb && target == null) return;
 
         if (imm == null) imm = VertexConsumerProvider.immediate(new BufferAllocator(1 << 20));
 
@@ -53,7 +60,9 @@ public final class Fx {
         Gfx.vc = imm.getBuffer(RenderLayer.getLightning());
 
         if (doAur) Aurora.draw(w, t, td);
-        if (doFly) Flies.draw(cam, td);
+        if (doFly) FLIES.draw(cam, td);
+        if (doDust) DUST.draw(cam, td);
+        if (doHb) Hitboxes.draw(mc, w, cam, t, td);
         if (target != null) TargetEsp.draw(target, cam, t, td);
 
         // glow must not be eaten by distance fog
@@ -126,50 +135,80 @@ public final class Fx {
         }
     }
 
-    // ----------------------------------------------------------------- particles
+    // ----------------------------------------------------- floating particles / cave dust
 
-    static final class Flies {
+    static final class Motes {
         private static final class F {
             double x, y, z, px, py, pz, vx, vy, vz, seed, sz, d, ix, iy, iz;
+            float light;
             int age, life;
         }
 
-        private static final ArrayList<F> list = new ArrayList<>();
+        private final boolean dust;
+        private final ArrayList<F> list = new ArrayList<>();
 
-        static void tick(MinecraftClient mc) {
-            if (!(Cfg.atmo && Cfg.flies) || mc.world == null || mc.player == null) {
+        Motes(boolean dust) {
+            this.dust = dust;
+        }
+
+        private boolean enabled() {
+            return dust ? Cfg.dust : (Cfg.atmo && Cfg.flies);
+        }
+
+        void tick(MinecraftClient mc) {
+            if (!enabled() || mc.world == null || mc.player == null) {
                 list.clear();
                 return;
             }
-            int target = (int) (110 * Cfg.fliesAmount);
-            for (int i = 0; i < 3 && list.size() < target; i++) {
-                double ang = Math.random() * Math.PI * 2, rr = 3 + Math.random() * 20;
+            ClientWorld w = mc.world;
+            BlockPos pp = mc.player.getBlockPos();
+            boolean canSpawn = !dust || w.getLightLevel(LightType.SKY, pp) <= 4;   // dust only in caves / indoors
+            int target = (int) (dust ? 130 * Cfg.dustAmount : 110 * Cfg.fliesAmount);
+            double sp = dust ? Cfg.dustSpeed : Cfg.fliesSpeed;
+
+            for (int i = 0; canSpawn && i < 3 && list.size() < target; i++) {
+                double ang = Math.random() * Math.PI * 2;
+                double rr = dust ? 1 + Math.random() * 9 : 3 + Math.random() * 20;
+                double x = mc.player.getX() + Math.cos(ang) * rr;
+                double y = mc.player.getY() + (dust ? -3 + Math.random() * 7 : -1 + Math.random() * 8);
+                double z = mc.player.getZ() + Math.sin(ang) * rr;
+                if (dust && !w.getBlockState(new BlockPos((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z))).isAir()) {
+                    continue;
+                }
                 F f = new F();
-                f.x = f.px = mc.player.getX() + Math.cos(ang) * rr;
-                f.y = f.py = mc.player.getY() - 1 + Math.random() * 8;
-                f.z = f.pz = mc.player.getZ() + Math.sin(ang) * rr;
+                f.x = f.px = x; f.y = f.py = y; f.z = f.pz = z;
                 f.seed = Math.random() * Math.PI * 2;
                 f.sz = 0.7 + Math.random() * 0.6;
-                f.life = 200 + (int) (Math.random() * 200);
+                f.life = (dust ? 150 : 200) + (int) (Math.random() * 200);
                 list.add(f);
             }
-            double sp = Cfg.fliesSpeed;
+
+            double maxD = dust ? 14 : 45;
             Iterator<F> it = list.iterator();
             while (it.hasNext()) {
                 F f = it.next();
                 f.age++;
                 f.px = f.x; f.py = f.y; f.pz = f.z;
                 double tt = f.age * 0.04 * sp + f.seed;
-                f.vx = f.vx * 0.96 + Math.sin(tt * 1.3) * 0.0016 * sp;
-                f.vy = f.vy * 0.96 + (Math.sin(tt * 0.9 + 2) * 0.0010 + 0.0003) * sp;
-                f.vz = f.vz * 0.96 + Math.cos(tt * 1.1 + 1) * 0.0016 * sp;
+                if (dust) {
+                    f.vx = f.vx * 0.97 + Math.sin(tt * 1.7) * 0.0004 * sp;
+                    f.vy = f.vy * 0.97 + Math.sin(tt * 1.1 + 2) * 0.00025 * sp;
+                    f.vz = f.vz * 0.97 + Math.cos(tt * 1.3 + 1) * 0.0004 * sp;
+                    BlockPos bp = new BlockPos((int) Math.floor(f.x), (int) Math.floor(f.y), (int) Math.floor(f.z));
+                    float lt = w.getLightLevel(LightType.BLOCK, bp) / 15f;
+                    f.light += (lt - f.light) * 0.15f;
+                } else {
+                    f.vx = f.vx * 0.96 + Math.sin(tt * 1.3) * 0.0016 * sp;
+                    f.vy = f.vy * 0.96 + (Math.sin(tt * 0.9 + 2) * 0.0010 + 0.0003) * sp;
+                    f.vz = f.vz * 0.96 + Math.cos(tt * 1.1 + 1) * 0.0016 * sp;
+                }
                 f.x += f.vx; f.y += f.vy; f.z += f.vz;
                 double dx = f.x - mc.player.getX(), dz = f.z - mc.player.getZ();
-                if (f.age >= f.life || dx * dx + dz * dz > 45 * 45) it.remove();
+                if (f.age >= f.life || dx * dx + dz * dz > maxD * maxD) it.remove();
             }
         }
 
-        static void draw(Vec3d cam, float td) {
+        void draw(Vec3d cam, float td) {
             if (list.isEmpty()) return;
             for (F f : list) {
                 f.ix = f.px + (f.x - f.px) * td;
@@ -181,10 +220,20 @@ public final class Fx {
             list.sort((a, b) -> Double.compare(b.d, a.d));   // far to near
             for (F f : list) {
                 double fade = Math.min(1.0, Math.min(f.age / 30.0, (f.life - f.age) / 30.0));
-                double twinkle = 0.75 + 0.25 * Math.sin(f.age * 0.09 + f.seed);
-                float al = (float) (fade * twinkle * 0.9);
-                float[] col = Gfx.pal(Cfg.fliesColor, f.seed / (Math.PI * 2));
-                Gfx.disc(f.ix - cam.x, f.iy - cam.y, f.iz - cam.z, 0.16 * Cfg.fliesSize * f.sz, col, al);
+                float al;
+                double rad;
+                float[] col;
+                if (dust) {
+                    al = (float) (fade * (0.03 + 0.85 * f.light * f.light));
+                    rad = 0.045 * Cfg.dustSize * f.sz;
+                    col = Gfx.pal(Cfg.dustColor, f.seed / (Math.PI * 2));
+                } else {
+                    double twinkle = 0.75 + 0.25 * Math.sin(f.age * 0.09 + f.seed);
+                    al = (float) (fade * twinkle * 0.9);
+                    rad = 0.16 * Cfg.fliesSize * f.sz;
+                    col = Gfx.pal(Cfg.fliesColor, f.seed / (Math.PI * 2));
+                }
+                Gfx.disc(f.ix - cam.x, f.iy - cam.y, f.iz - cam.z, rad, col, al);
             }
         }
     }

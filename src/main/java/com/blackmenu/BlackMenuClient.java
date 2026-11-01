@@ -5,7 +5,11 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.TitleScreen;
+import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.effect.StatusEffectInstance;
@@ -23,6 +27,10 @@ public class BlackMenuClient implements ClientModInitializer {
                 "key.blackmenu.open", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "category.blackmenu"));
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+            if (Cfg.titleChains && mc.currentScreen instanceof TitleScreen) {
+                mc.setScreen(new ChainTitleScreen());
+            }
+
             while (openKey.wasPressed()) {
                 if (mc.currentScreen == null) mc.setScreen(new BlackMenuScreen());
             }
@@ -36,21 +44,15 @@ public class BlackMenuClient implements ClientModInitializer {
             }
 
             Fx.applyTime(mc);
-            Fx.Flies.tick(mc);
+            Fx.FLIES.tick(mc);
+            Fx.DUST.tick(mc);
         });
 
-        HudRenderCallback.EVENT.register((ctx, tick) -> {
-            MinecraftClient mc = MinecraftClient.getInstance();
-            if (mc.player == null || mc.options.hudHidden) return;
-            int y = 6;
-            if (Cfg.fps) {
-                ctx.drawTextWithShadow(mc.textRenderer, mc.getCurrentFps() + " FPS", 6, y, 0xFFFFFFFF);
-                y += 11;
-            }
-            if (Cfg.coords) {
-                ctx.drawTextWithShadow(mc.textRenderer,
-                        mc.player.getBlockX() + " " + mc.player.getBlockY() + " " + mc.player.getBlockZ(),
-                        6, y, 0xFFFFFFFF);
+        HudRenderCallback.EVENT.register((ctx, tick) -> CustomHud.render(ctx, MinecraftClient.getInstance()));
+
+        ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
+            if (screen instanceof HandledScreen<?> hs && !(screen instanceof CreativeInventoryScreen)) {
+                ScreenEvents.afterRender(screen).register((s, ctx, mx, my, d) -> Borders.container(hs, ctx));
             }
         });
 

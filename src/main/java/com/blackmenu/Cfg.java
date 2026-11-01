@@ -14,8 +14,28 @@ import java.util.Properties;
 /** All settings. Saved to config/blackmenu.properties when the menu closes. */
 public final class Cfg {
     // general
-    public static boolean fullbright, fps, coords;
+    public static boolean fullbright, titleChains = true;
     public static float menuScale = 1f;
+
+    // blur+
+    public static boolean blurMenu = true;
+    public static float blurDim = 0.3f;
+
+    // hud
+    public static boolean hotbar = true, infoPanel = true, fps = true, coords, ping;
+    public static int hudAccent = 6;
+    public static float hudAlpha = 0.85f;
+    public static boolean smoothSwap = true;
+    public static float swapSpeed = 1f;
+
+    // item borders
+    public static boolean borders = true, bordersInv = true, bordersHotbar = true, bordersHideCommon = true;
+    public static float bordersAlpha = 0.9f;
+
+    // hitboxes
+    public static boolean hb, hbPlayers = true, hbMobs = true, hbOthers, hbFill = true, hbEye = true;
+    public static int hbColor = 0;
+    public static float hbWidth = 1f, hbAlpha = 1f;
 
     // target esp
     public static boolean esp, espLightning = true, espCircle = true, espChains, espOrbs;
@@ -27,6 +47,11 @@ public final class Cfg {
     public static int atmoTime = 1, auroraColor = 0, fliesColor = 5;
     public static float auroraGlow = 1f, auroraSpeed = 1f;
     public static float fliesAmount = 1f, fliesSize = 1f, fliesSpeed = 1f;
+
+    // cave dust
+    public static boolean dust;
+    public static int dustColor = 6;
+    public static float dustAmount = 1f, dustSize = 1f, dustSpeed = 1f;
 
     private Cfg() {}
 

@@ -3,12 +3,13 @@
   "id": "blackmenu",
   "version": "${version}",
   "name": "Black Menu",
-  "description": "Minimal black visual menu. Open with Right Shift.",
+  "description": "Minimal black visual client menu. Open with Right Shift.",
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
     "client": ["com.blackmenu.BlackMenuClient"]
   },
+  "mixins": ["blackmenu.mixins.json"],
   "depends": {
     "fabricloader": ">=0.16.0",
     "minecraft": "~1.21.1",

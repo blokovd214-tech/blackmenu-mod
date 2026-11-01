@@ -15,12 +15,33 @@ import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
+import static com.blackmenu.Ui.argb;
+import static com.blackmenu.Ui.inside;
+import static com.blackmenu.Ui.mix;
+import static com.blackmenu.Ui.rrect;
+
 public class BlackMenuScreen extends Screen {
     private static final int W = 260, ROW = 26, PAD = 16, HEAD = 52, R = 10, SW = 86, PILL = 100;
     private static final float MIN_SCALE = 0.6f, MAX_SCALE = 1.5f;
+    private static final String[] HB_COLORS = {"By type", "Cyan", "Purple", "Pink", "Red", "Green", "Gold", "White", "Rainbow"};
 
-    private enum Page { MAIN, ESP, ATMO }
-    private enum Kind { TOGGLE, SLIDER, CHOICE }
+    private enum Page {
+        MAIN(null, "BLACK MENU"),
+        VISUAL(MAIN, "VISUAL"), PVP(MAIN, "PVP"), WORLD(MAIN, "WORLD"), HUD(MAIN, "HUD"), SETTINGS(MAIN, "SETTINGS"),
+        BORDERS(VISUAL, "ITEM BORDERS"), BLUR(VISUAL, "BLUR+"),
+        HITBOX(PVP, "HITBOXES"), ESP(PVP, "TARGET ESP"),
+        ATMO(WORLD, "ATMOSPHERE"), DUST(WORLD, "CAVE DUST");
+
+        final Page parent;
+        final String title;
+
+        Page(Page parent, String title) {
+            this.parent = parent;
+            this.title = title;
+        }
+    }
+
+    private enum Kind { TOGGLE, SLIDER, CHOICE, LINK, SIZE }
 
     private static final class Row {
         Kind kind;
@@ -56,6 +77,18 @@ public class BlackMenuScreen extends Screen {
         return r;
     }
 
+    private static Row link(String name, Page p) {
+        Row r = new Row();
+        r.kind = Kind.LINK; r.name = name; r.link = p;
+        return r;
+    }
+
+    private static Row size() {
+        Row r = new Row();
+        r.kind = Kind.SIZE; r.name = "Menu size";
+        return r;
+    }
+
     private final EnumMap<Page, List<Row>> pages = new EnumMap<>(Page.class);
     private Page page = Page.MAIN;
     private Row dragging;
@@ -67,11 +100,59 @@ public class BlackMenuScreen extends Screen {
         super(Text.literal("Black Menu"));
 
         pages.put(Page.MAIN, List.of(
+                link("Visual", Page.VISUAL),
+                link("PvP", Page.PVP),
+                link("World", Page.WORLD),
+                link("HUD", Page.HUD),
+                link("Settings", Page.SETTINGS)));
+
+        pages.put(Page.VISUAL, List.of(
                 toggle("Fullbright", () -> Cfg.fullbright, BlackMenuClient::setFullbright, null),
+                toggle("Smooth swapping", () -> Cfg.smoothSwap, v -> Cfg.smoothSwap = v, null),
+                slider("Swap speed", 0.5f, 3f, () -> Cfg.swapSpeed, v -> Cfg.swapSpeed = v),
+                toggle("Item borders", () -> Cfg.borders, v -> Cfg.borders = v, Page.BORDERS),
+                link("Blur+", Page.BLUR)));
+
+        pages.put(Page.PVP, List.of(
+                toggle("Hitboxes", () -> Cfg.hb, v -> Cfg.hb = v, Page.HITBOX),
+                toggle("Target ESP", () -> Cfg.esp, v -> Cfg.esp = v, Page.ESP)));
+
+        pages.put(Page.WORLD, List.of(
+                toggle("Atmosphere", () -> Cfg.atmo, v -> Cfg.atmo = v, Page.ATMO),
+                toggle("Cave dust", () -> Cfg.dust, v -> Cfg.dust = v, Page.DUST)));
+
+        pages.put(Page.HUD, List.of(
+                toggle("Hotbar", () -> Cfg.hotbar, v -> Cfg.hotbar = v, null),
+                toggle("Info panel", () -> Cfg.infoPanel, v -> Cfg.infoPanel = v, null),
                 toggle("FPS", () -> Cfg.fps, v -> Cfg.fps = v, null),
                 toggle("Coordinates", () -> Cfg.coords, v -> Cfg.coords = v, null),
-                toggle("Target ESP", () -> Cfg.esp, v -> Cfg.esp = v, Page.ESP),
-                toggle("Atmosphere", () -> Cfg.atmo, v -> Cfg.atmo = v, Page.ATMO)));
+                toggle("Ping", () -> Cfg.ping, v -> Cfg.ping = v, null),
+                choice("Accent", Gfx.PALETTE, () -> Cfg.hudAccent, v -> Cfg.hudAccent = v),
+                slider("Opacity", 0.3f, 1f, () -> Cfg.hudAlpha, v -> Cfg.hudAlpha = v)));
+
+        pages.put(Page.SETTINGS, List.of(
+                toggle("Chain title screen", () -> Cfg.titleChains, v -> Cfg.titleChains = v, null),
+                size()));
+
+        pages.put(Page.BORDERS, List.of(
+                toggle("Inventory", () -> Cfg.bordersInv, v -> Cfg.bordersInv = v, null),
+                toggle("Hotbar", () -> Cfg.bordersHotbar, v -> Cfg.bordersHotbar = v, null),
+                toggle("Hide common", () -> Cfg.bordersHideCommon, v -> Cfg.bordersHideCommon = v, null),
+                slider("Opacity", 0.2f, 1f, () -> Cfg.bordersAlpha, v -> Cfg.bordersAlpha = v)));
+
+        pages.put(Page.BLUR, List.of(
+                toggle("Blur menu", () -> Cfg.blurMenu, v -> Cfg.blurMenu = v, null),
+                slider("Dim", 0f, 0.9f, () -> Cfg.blurDim, v -> Cfg.blurDim = v)));
+
+        pages.put(Page.HITBOX, List.of(
+                toggle("Players", () -> Cfg.hbPlayers, v -> Cfg.hbPlayers = v, null),
+                toggle("Mobs", () -> Cfg.hbMobs, v -> Cfg.hbMobs = v, null),
+                toggle("Others", () -> Cfg.hbOthers, v -> Cfg.hbOthers = v, null),
+                toggle("Fill", () -> Cfg.hbFill, v -> Cfg.hbFill = v, null),
+                toggle("Eye line", () -> Cfg.hbEye, v -> Cfg.hbEye = v, null),
+                choice("Color", HB_COLORS, () -> Cfg.hbColor, v -> Cfg.hbColor = v),
+                slider("Line width", 0.5f, 3f, () -> Cfg.hbWidth, v -> Cfg.hbWidth = v),
+                slider("Opacity", 0.2f, 1f, () -> Cfg.hbAlpha, v -> Cfg.hbAlpha = v)));
 
         pages.put(Page.ESP, List.of(
                 toggle("Lightning", () -> Cfg.espLightning, v -> Cfg.espLightning = v, null),
@@ -94,6 +175,12 @@ public class BlackMenuScreen extends Screen {
                 slider("Particle amount", 0.1f, 2f, () -> Cfg.fliesAmount, v -> Cfg.fliesAmount = v),
                 slider("Particle size", 0.4f, 3f, () -> Cfg.fliesSize, v -> Cfg.fliesSize = v),
                 slider("Particle speed", 0.2f, 3f, () -> Cfg.fliesSpeed, v -> Cfg.fliesSpeed = v)));
+
+        pages.put(Page.DUST, List.of(
+                slider("Amount", 0.1f, 2f, () -> Cfg.dustAmount, v -> Cfg.dustAmount = v),
+                slider("Size", 0.4f, 3f, () -> Cfg.dustSize, v -> Cfg.dustSize = v),
+                slider("Speed", 0.2f, 3f, () -> Cfg.dustSpeed, v -> Cfg.dustSpeed = v),
+                choice("Color", Gfx.PALETTE, () -> Cfg.dustColor, v -> Cfg.dustColor = v)));
     }
 
     @Override
@@ -108,47 +195,13 @@ public class BlackMenuScreen extends Screen {
 
     // ---------- helpers ----------
 
-    private String title() {
-        return switch (page) {
-            case MAIN -> "BLACK MENU";
-            case ESP -> "TARGET ESP";
-            case ATMO -> "ATMOSPHERE";
-        };
-    }
-
     private float progress() {
         float t = Math.min(1f, (System.currentTimeMillis() - opened) / 200f);
         return 1f - (1f - t) * (1f - t);
     }
 
-    private static int argb(int rgb, float a) {
-        return ((int) (Math.max(0f, Math.min(1f, a)) * 255) << 24) | (rgb & 0xFFFFFF);
-    }
-
-    private static int mix(int from, int to, float t) {
-        int r = (int) (((from >> 16) & 255) * (1 - t) + ((to >> 16) & 255) * t);
-        int g = (int) (((from >> 8) & 255) * (1 - t) + ((to >> 8) & 255) * t);
-        int b = (int) ((from & 255) * (1 - t) + (to & 255) * t);
-        return (r << 16) | (g << 8) | b;
-    }
-
-    private static void rrect(DrawContext c, int x, int y, int w, int h, int r, int color) {
-        r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
-        for (int i = 0; i < r; i++) {
-            double dy = r - i - 0.5;
-            int inset = r - (int) Math.round(Math.sqrt(r * r - dy * dy));
-            c.fill(x + inset, y + i, x + w - inset, y + i + 1, color);
-            c.fill(x + inset, y + h - 1 - i, x + w - inset, y + h - i, color);
-        }
-        c.fill(x, y + r, x + w, y + h - r, color);
-    }
-
-    private static boolean inside(double px, double py, int x, int y, int w, int h) {
-        return px >= x && px < x + w && py >= y && py < y + h;
-    }
-
     private int panelH() {
-        return HEAD + (pages.get(page).size() + (page == Page.MAIN ? 1 : 0)) * ROW + 10;
+        return HEAD + pages.get(page).size() * ROW + 10;
     }
 
     private int px() {
@@ -187,11 +240,22 @@ public class BlackMenuScreen extends Screen {
         r.setF.accept(Math.round(v * 10f) / 10f);
     }
 
+    private void go(Page p) {
+        page = p;
+        dragging = null;
+    }
+
     // ---------- rendering ----------
 
     @Override
     public void renderBackground(DrawContext c, int mx, int my, float delta) {
-        c.fill(0, 0, width, height, argb(0x000000, 0.55f * progress()));
+        float p = progress();
+        if (Cfg.blurMenu && client != null && client.world != null) {
+            super.renderBackground(c, mx, my, delta);   // the game's own background blur
+            if (Cfg.blurDim > 0f) c.fill(0, 0, width, height, argb(0x000000, Cfg.blurDim * p));
+        } else {
+            c.fill(0, 0, width, height, argb(0x000000, (0.35f + Cfg.blurDim * 0.5f) * p));
+        }
     }
 
     @Override
@@ -224,7 +288,7 @@ public class BlackMenuScreen extends Screen {
                 c.drawText(textRenderer, "RIGHT SHIFT", x + PAD, y + 27, argb(0x555555, a), false);
             } else {
                 boolean hb = inside(ux, uy, x, y, W, HEAD - 8);
-                c.drawText(textRenderer, Text.literal("< " + title()).formatted(Formatting.BOLD),
+                c.drawText(textRenderer, Text.literal("< " + page.title).formatted(Formatting.BOLD),
                         x + PAD, y + 14, argb(hb ? 0xFFFFFF : 0xBBBBBB, a), false);
                 c.drawText(textRenderer, "BACK", x + PAD, y + 27, argb(0x555555, a), false);
             }
@@ -234,15 +298,13 @@ public class BlackMenuScreen extends Screen {
         for (int i = 0; i < rows.size(); i++) {
             drawRow(c, rows.get(i), x, y + HEAD + i * ROW, a, dt, ux, uy);
         }
-        if (page == Page.MAIN) drawSize(c, x, y + HEAD + rows.size() * ROW, a, ux, uy);
 
         ms.pop();
     }
 
     private void drawRow(DrawContext c, Row r, int x, int ry, float a, float dt, double ux, double uy) {
-        if (inside(ux, uy, x, ry, W, ROW)) {
-            rrect(c, x + 6, ry + 1, W - 12, ROW - 2, 6, argb(0x101010, a));
-        }
+        boolean rowHover = inside(ux, uy, x, ry, W, ROW);
+        if (rowHover) rrect(c, x + 6, ry + 1, W - 12, ROW - 2, 6, argb(0x101010, a));
         int ty = ry + (ROW - 8) / 2;
 
         switch (r.kind) {
@@ -274,8 +336,7 @@ public class BlackMenuScreen extends Screen {
                 }
                 int tx = sliderX(x), tyy = ry + ROW / 2 - 2;
                 rrect(c, tx, tyy, SW, 4, 2, argb(0x1E1E1E, a));
-                int fw = Math.max(4, (int) (SW * f));
-                rrect(c, tx, tyy, fw, 4, 2, argb(0xFFFFFF, a));
+                rrect(c, tx, tyy, Math.max(4, (int) (SW * f)), 4, 2, argb(0xFFFFFF, a));
                 rrect(c, tx + (int) ((SW - 8) * f), tyy - 2, 8, 8, 4, argb(0xFFFFFF, a));
             }
             case CHOICE -> {
@@ -283,39 +344,40 @@ public class BlackMenuScreen extends Screen {
                 String txt = r.opts[Math.floorMod(r.getI.getAsInt(), n)];
                 int pxl = x + W - PAD - PILL;
                 boolean hv = inside(ux, uy, pxl, ry + 3, PILL, ROW - 6);
-                if (a > 0.05f) {
-                    c.drawText(textRenderer, r.name, x + PAD, ty, argb(0x8A8A8A, a), false);
-                }
+                if (a > 0.05f) c.drawText(textRenderer, r.name, x + PAD, ty, argb(0x8A8A8A, a), false);
                 rrect(c, pxl, ry + 3, PILL, ROW - 6, 6, argb(hv ? 0x1E1E1E : 0x131313, a));
                 if (a > 0.05f) {
                     c.drawText(textRenderer, txt, pxl + (PILL - textRenderer.getWidth(txt)) / 2, ty,
                             argb(0xFFFFFF, a), false);
                 }
             }
+            case LINK -> {
+                if (a > 0.05f) {
+                    c.drawText(textRenderer, r.name, x + PAD, ty, argb(rowHover ? 0xFFFFFF : 0xBBBBBB, a), false);
+                    c.drawText(textRenderer, ">", x + W - PAD - 6, ty, argb(rowHover ? 0xFFFFFF : 0x666666, a), false);
+                }
+            }
+            case SIZE -> {
+                int plusX = x + W - PAD - 16;
+                int textL = plusX - 6 - 28;
+                int minusX = textL - 6 - 16;
+                int by = ry + 5;
+                if (a > 0.05f) {
+                    c.drawText(textRenderer, r.name, x + PAD, ty, argb(0x8A8A8A, a), false);
+                    String pct = Math.round(Cfg.menuScale * 100) + "%";
+                    c.drawText(textRenderer, pct, textL + (28 - textRenderer.getWidth(pct)) / 2, ty,
+                            argb(0xCCCCCC, a), false);
+                }
+                boolean hMinus = inside(ux, uy, minusX, by, 16, 16);
+                boolean hPlus = inside(ux, uy, plusX, by, 16, 16);
+                rrect(c, minusX, by, 16, 16, 5, argb(hMinus ? 0x2A2A2A : 0x151515, a));
+                rrect(c, plusX, by, 16, 16, 5, argb(hPlus ? 0x2A2A2A : 0x151515, a));
+                int sym = argb(0xFFFFFF, a);
+                c.fill(minusX + 4, by + 7, minusX + 12, by + 9, sym);
+                c.fill(plusX + 4, by + 7, plusX + 12, by + 9, sym);
+                c.fill(plusX + 7, by + 4, plusX + 9, by + 12, sym);
+            }
         }
-    }
-
-    private void drawSize(DrawContext c, int x, int rowY, float a, double ux, double uy) {
-        int plusX = x + W - PAD - 16;
-        int textL = plusX - 6 - 28;
-        int minusX = textL - 6 - 16;
-        int by = rowY + 5;
-
-        if (a > 0.05f) {
-            int ty = rowY + (ROW - 8) / 2;
-            c.drawText(textRenderer, "Size", x + PAD, ty, argb(0x8A8A8A, a), false);
-            String pct = Math.round(Cfg.menuScale * 100) + "%";
-            c.drawText(textRenderer, pct, textL + (28 - textRenderer.getWidth(pct)) / 2, ty,
-                    argb(0xCCCCCC, a), false);
-        }
-        boolean hMinus = inside(ux, uy, minusX, by, 16, 16);
-        boolean hPlus = inside(ux, uy, plusX, by, 16, 16);
-        rrect(c, minusX, by, 16, 16, 5, argb(hMinus ? 0x2A2A2A : 0x151515, a));
-        rrect(c, plusX, by, 16, 16, 5, argb(hPlus ? 0x2A2A2A : 0x151515, a));
-        int sym = argb(0xFFFFFF, a);
-        c.fill(minusX + 4, by + 7, minusX + 12, by + 9, sym);
-        c.fill(plusX + 4, by + 7, plusX + 12, by + 9, sym);
-        c.fill(plusX + 7, by + 4, plusX + 9, by + 12, sym);
     }
 
     // ---------- input ----------
@@ -326,8 +388,7 @@ public class BlackMenuScreen extends Screen {
         int x = px(), y = py();
 
         if (page != Page.MAIN && button == 0 && inside(ux, uy, x, y, W, HEAD - 8)) {
-            page = Page.MAIN;
-            dragging = null;
+            go(page.parent);
             return true;
         }
 
@@ -338,14 +399,6 @@ public class BlackMenuScreen extends Screen {
             click(rows.get(i), x, ry, ux, uy, button);
             return true;
         }
-
-        if (page == Page.MAIN && button == 0) {
-            int rowY = y + HEAD + rows.size() * ROW;
-            int plusX = x + W - PAD - 16;
-            int minusX = plusX - 6 - 28 - 6 - 16;
-            if (inside(ux, uy, minusX, rowY + 5, 16, 16)) { changeScale(-0.1f); return true; }
-            if (inside(ux, uy, plusX, rowY + 5, 16, 16)) { changeScale(0.1f); return true; }
-        }
         return super.mouseClicked(mx, my, button);
     }
 
@@ -354,12 +407,8 @@ public class BlackMenuScreen extends Screen {
             case TOGGLE -> {
                 if (button != 0) return;
                 int sx = x + W - PAD - 28;
-                if (r.link != null && inside(ux, uy, sx - 24, ry, 20, ROW)) {
-                    page = r.link;
-                    dragging = null;
-                } else {
-                    r.setB.accept(!r.getB.getAsBoolean());
-                }
+                if (r.link != null && inside(ux, uy, sx - 24, ry, 20, ROW)) go(r.link);
+                else r.setB.accept(!r.getB.getAsBoolean());
             }
             case SLIDER -> {
                 if (button == 0 && inside(ux, uy, sliderX(x) - 6, ry, SW + 12, ROW)) {
@@ -371,6 +420,16 @@ public class BlackMenuScreen extends Screen {
                 int n = r.opts.length;
                 int i = Math.floorMod(r.getI.getAsInt(), n);
                 r.setI.accept(Math.floorMod(i + (button == 1 ? -1 : 1), n));
+            }
+            case LINK -> {
+                if (button == 0) go(r.link);
+            }
+            case SIZE -> {
+                if (button != 0) return;
+                int plusX = x + W - PAD - 16;
+                int minusX = plusX - 6 - 28 - 6 - 16;
+                if (inside(ux, uy, minusX, ry + 5, 16, 16)) changeScale(-0.1f);
+                else if (inside(ux, uy, plusX, ry + 5, 16, 16)) changeScale(0.1f);
             }
         }
     }
@@ -403,8 +462,7 @@ public class BlackMenuScreen extends Screen {
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_BACKSPACE && page != Page.MAIN) {
-            page = Page.MAIN;
-            dragging = null;
+            go(page.parent);
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
