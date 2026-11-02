@@ -77,7 +77,7 @@ public class HelixTitleScreen extends Screen {
         double nx = ay, ny = -ax;                           // normal
         double len = ph * 1.7, radius = ph * 0.17 * (1 + 0.05 * Math.sin(T * 0.7));
         double turns = 2.6;
-        int n = 90;
+        int n = (int) Math.max(30, 90 * Perf.q());
 
         for (int pass = 0; pass < 2; pass++) {
             for (int s = 0; s < 2; s++) {
@@ -153,33 +153,29 @@ public class HelixTitleScreen extends Screen {
         ms.pop();
 
         float fade = (float) Math.min(1.0, Math.max(0, (tOpen - 0.6) / 0.9));
+        Px.begin(c, (int) Math.max(1, Math.round(gs)), 0, 0);
 
         // pill tag
         String tag = Mods.tr("VISUAL CLIENT x 1.21.1|ВИЗУАЛЬНЫЙ КЛИЕНТ x 1.21.1");
-        int tw0 = textRenderer.getWidth(tag) + 18;
-        int tagY = (int) (height * 0.27);
-        int tagX = (width - tw0) / 2;
-        Ui.rrect(c, tagX - 1, tagY - 1, tw0 + 2, 16, 8, Ui.argb(0x56667E, 0.8f * fade));
-        Ui.rrect(c, tagX, tagY, tw0, 14, 7, Ui.argb(0x0A0E1A, 0.85f * fade));
-        c.drawText(textRenderer, tag, tagX + 9, tagY + 3, Ui.argb(0xB8C8DC, fade), false);
+        double tagW = Px.tw(tag, 1) + 18;
+        double tagY = height * 0.27, tagX = (width - tagW) / 2;
+        Px.rr(tagX - 0.5, tagY - 0.5, tagW + 1, 15, 7.5, Ui.argb(0x56667E, 0.8f * fade));
+        Px.rr(tagX, tagY, tagW, 14, 7, Ui.argb(0x0A0E1A, 0.85f * fade));
+        Px.text(tag, tagX + 9, tagY + 3, Ui.argb(0xB8C8DC, fade), 1);
 
         // title with a soft glow
-        int ty = (int) (height * 0.27) + 24;
-        MatrixStack m2 = c.getMatrices();
-        m2.push();
-        m2.translate(width / 2f, (float) ty, 0f);
-        m2.scale(3f, 3f, 1f);
+        double ty = tagY + 24;
         Text title = Text.literal("BLACK MENU").formatted(Formatting.BOLD);
-        int tw = textRenderer.getWidth(title);
-        int[][] offs = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-        for (int[] o : offs) {
-            c.drawText(textRenderer, title, -tw / 2 + o[0], o[1], Ui.argb(0x7FF5FF, 0.22f * fade), false);
+        double tx = (width - Px.tw(title, 3)) / 2;
+        double o = 1.5 / Px.u;
+        double[][] offs = {{-o, 0}, {o, 0}, {0, -o}, {0, o}};
+        for (double[] d : offs) {
+            Px.text(title, tx + d[0], ty + d[1], Ui.argb(0x7FF5FF, 0.22f * fade), 3, false);
         }
-        c.drawText(textRenderer, title, -tw / 2, 0, Ui.argb(0xFFFFFF, fade), true);
-        m2.pop();
+        Px.text(title, tx, ty, Ui.argb(0xFFFFFF, fade), 3, true);
 
         String sub = Mods.tr("Watch points of light organize into your client|Смотри, как точки света складываются в твой клиент");
-        c.drawText(textRenderer, sub, (width - textRenderer.getWidth(sub)) / 2, ty + 32, Ui.argb(0x8FA0B8, fade), true);
+        Px.text(sub, (width - Px.tw(sub, 1)) / 2, ty + 32, Ui.argb(0x8FA0B8, fade), 1);
 
         // pill buttons
         int n = LABELS.length, gap = 8;
@@ -193,16 +189,16 @@ public class HelixTitleScreen extends Screen {
             boolean hv = Ui.inside(mx, my, bx, by, bw, bh);
             hover[i] += ((hv ? 1f : 0f) - hover[i]) * Math.min(1f, dt * 14f);
             float hf = hover[i];
-            if (hf > 0.03f) Ui.rrect(c, bx - 3, by - 3, bw + 6, bh + 6, 12, Ui.argb(0x7FF5FF, 0.12f * hf * f));
-            Ui.rrect(c, bx - 1, by - 1, bw + 2, bh + 2, 10, Ui.argb(Ui.mix(0x3A4660, 0xBFF4FF, hf), f));
-            Ui.rrect(c, bx, by, bw, bh, 9, Ui.argb(Ui.mix(0x090C16, 0x14202E, hf), 0.92f * f));
+            if (hf > 0.03f) Px.rr(bx - 3, by - 3, bw + 6, bh + 6, 12, Ui.argb(0x7FF5FF, 0.12f * hf * f));
+            Px.rr(bx - 1, by - 1, bw + 2, bh + 2, 10, Ui.argb(Ui.mix(0x3A4660, 0xBFF4FF, hf), f));
+            Px.rr(bx, by, bw, bh, 9, Ui.argb(Ui.mix(0x090C16, 0x14202E, hf), 0.92f * f));
             String label = Mods.tr(LABELS[i]);
-            c.drawText(textRenderer, label, bx + (bw - textRenderer.getWidth(label)) / 2, by + 5,
-                    Ui.argb(Ui.mix(0x9AA8BC, 0xFFFFFF, hf), f), false);
+            Px.text(label, bx + (bw - Px.tw(label, 1)) / 2, by + 5, Ui.argb(Ui.mix(0x9AA8BC, 0xFFFFFF, hf), f), 1);
         }
 
         String hint = Mods.tr("RIGHT SHIFT  -  menu in game|RIGHT SHIFT  -  меню в игре");
-        c.drawText(textRenderer, hint, (width - textRenderer.getWidth(hint)) / 2, height - 14, Ui.argb(0x44506A, fade), false);
+        Px.text(hint, (width - Px.tw(hint, 1)) / 2, height - 14, Ui.argb(0x44506A, fade), 1);
+        Px.end();
     }
 
     @Override

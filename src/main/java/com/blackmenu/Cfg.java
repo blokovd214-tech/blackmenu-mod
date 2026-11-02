@@ -26,6 +26,7 @@ public final class Cfg {
 
     // hud
     public static boolean hotbar = true, infoPanel = true, fps = true, coords, ping;
+    public static boolean arraylist = true, targetHud = true, armorHud = true, effectsHud = true;
     public static int hudAccent = 6;
     public static float hudAlpha = 0.85f;
     public static boolean smoothSwap = true;
@@ -50,15 +51,22 @@ public final class Cfg {
     public static int atmoMode = 1, atmoTime = 0;
     public static float atmoDensity = 1f, atmoSize = 1f, atmoSpeed = 1f, atmoWind = 1f, auroraGlow = 1f;
 
+    // norender
+    public static boolean nr, nrHurt = true, nrFire = true, nrItems = true, nrXp, nrStands, nrLightning;
+
     // weather and wet floor
-    public static boolean wx, wxPuddles = true, wxRipples = true;
+    public static boolean wx, wxPuddles = true, wxRipples = true, wxOvercast = true, wxSplash = true;
     public static int wxMode = 0;
-    public static float wxDensity = 1f, wxRadius = 16f, wxHeight = 24f, wxSize = 1f, wxShine = 1f;
+    public static float wxDensity = 0.5f, wxRadius = 16f, wxHeight = 24f, wxSize = 1f, wxShine = 1f;
 
     // kill effect
     public static boolean kfx;
     public static int kfxMode = 0;
     public static float kfxPower = 1f, kfxSize = 1f;
+
+    // performance
+    public static int quality = 1;
+    public static boolean adaptive = true;
 
     // cave dust
     public static boolean dust;

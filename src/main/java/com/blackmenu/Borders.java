@@ -31,13 +31,15 @@ final class Borders {
 
         c.getMatrices().push();
         c.getMatrices().translate(0f, 0f, 190f);   // above items, below tooltips
+        Px.begin(c, (int) Math.max(1, Math.round(Px.guiScale())), 0, 0);
         for (Slot s : hs.getScreenHandler().slots) {
             if (!s.isEnabled()) continue;
             int col = color(s.getStack());
             if (col < 0) continue;
-            Ui.ring(c, ox + s.x - 2, oy + s.y - 2, 20, 20, Ui.argb(col, Cfg.bordersAlpha * 0.3f));
-            Ui.ring(c, ox + s.x - 1, oy + s.y - 1, 18, 18, Ui.argb(col, Cfg.bordersAlpha));
+            Px.ring(ox + s.x - 2, oy + s.y - 2, 20, 20, 6, Ui.argb(col, Cfg.bordersAlpha * 0.3f));
+            Px.ring(ox + s.x - 1, oy + s.y - 1, 18, 18, 5, Ui.argb(col, Cfg.bordersAlpha));
         }
+        Px.end();
         c.getMatrices().pop();
     }
 }

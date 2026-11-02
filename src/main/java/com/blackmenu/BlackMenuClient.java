@@ -43,7 +43,11 @@ public class BlackMenuClient implements ClientModInitializer {
                 }
             }
 
+            Perf.tick(mc);
             Fx.applyTime(mc);
+            NoRender.frame(mc);
+            NoRender.tick(mc);
+            Weather.frame(mc);
             Weather.tick(mc);
             Fx.FLIES.tick(mc);
             Fx.DUST.tick(mc);
@@ -58,7 +62,12 @@ public class BlackMenuClient implements ClientModInitializer {
             }
         });
 
-        WorldRenderEvents.START.register(ctx -> Fx.applyTime(MinecraftClient.getInstance()));
+        WorldRenderEvents.START.register(ctx -> {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            Fx.applyTime(mc);
+            NoRender.frame(mc);
+            Weather.frame(mc);
+        });
         WorldRenderEvents.AFTER_TRANSLUCENT.register(Fx::render);
     }
 

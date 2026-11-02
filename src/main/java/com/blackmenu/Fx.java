@@ -107,7 +107,7 @@ public final class Fx {
             if (night < 0.01) return;
 
             double spd = Cfg.atmoSpeed;
-            int n = 40, m = 7;
+            int n = (int) Math.max(16, 40 * Perf.q()), m = 7;
             for (int k = 2; k >= 0; k--) {   // far to near
                 double rho = 240 + 45 * k;
                 double center = 0.9 + k * 2.1 + Math.sin(t * 0.05 * spd + k) * 0.15;
@@ -168,7 +168,7 @@ public final class Fx {
             ClientWorld w = mc.world;
             BlockPos pp = mc.player.getBlockPos();
             boolean canSpawn = !dust || w.getLightLevel(LightType.SKY, pp) <= 4;   // dust only in caves / indoors
-            int target = (int) (dust ? 130 * Cfg.dustAmount : 110 * Cfg.atmoDensity);
+            int target = (int) ((dust ? 130 * Cfg.dustAmount : 110 * Cfg.atmoDensity) * Perf.q());
             double sp = dust ? Cfg.dustSpeed : Cfg.atmoSpeed;
 
             for (int i = 0; canSpawn && i < 3 && list.size() < target; i++) {

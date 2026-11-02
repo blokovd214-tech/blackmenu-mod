@@ -5,6 +5,7 @@
   "name": "Black Menu",
   "description": "Minimal black visual client menu. Open with Right Shift.",
   "license": "MIT",
+  "icon": "assets/blackmenu/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": ["com.blackmenu.BlackMenuClient"]

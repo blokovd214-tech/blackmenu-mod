@@ -10,7 +10,7 @@ import net.minecraft.world.Heightmap;
 import java.util.ArrayList;
 import java.util.Iterator;
 
-/** Rain, wet floor (puddles with a soft sheen) and ripples. Also keeps a small ground height cache. */
+/** Rain, wet glossy floor (sky reflection that gets stronger at grazing angles), ripples and splashes. */
 final class Weather {
     static final int CR = 24, N = CR * 2 + 1;
     private static final float[] top = new float[N * N];
@@ -18,12 +18,24 @@ final class Weather {
     private static int ox, oz;
     private static boolean valid;
     private static final ArrayList<double[]> ripples = new ArrayList<>();   // x, y, z, bornTick
+    private static final ArrayList<double[]> splashes = new ArrayList<>();  // x, y, z, bornTick, seed
     private static final float[][] RAIN = {{0.6f, 0.72f, 1f}};
+    private static final double[] AL = new double[4];
+    private static final int[][] CS = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    private static final float[] DROP = {0.75f, 0.85f, 1f};
 
     private Weather() {}
 
+    static boolean storm() {
+        return Cfg.atmo && Atmos.theme().storm;
+    }
+
     static boolean raining() {
-        return (Cfg.wx && Cfg.wxMode != 1) || (Cfg.atmo && Atmos.theme().storm);
+        return (Cfg.wx && Cfg.wxMode != 1) || storm();
+    }
+
+    static boolean wet() {
+        return Cfg.wx || storm();
     }
 
     /** Highest motion blocking Y of the column (roof or ground), NaN if unknown. */
@@ -42,11 +54,24 @@ final class Weather {
         return floor[i * N + j] ? top[i * N + j] : Float.NaN;
     }
 
+    /** Every frame: makes the sky overcast and rainy (client side) so the vanilla rain and gloom appear. */
+    static void frame(MinecraftClient mc) {
+        ClientWorld w = mc.world;
+        if (w == null) return;
+        if (Cfg.wx && Cfg.wxOvercast && Cfg.wxMode != 1) {
+            w.setRainGradient(Cfg.wxMode == 2 ? 0.45f : 1f);
+        } else if (storm()) {
+            w.setRainGradient(1f);
+            w.setThunderGradient(0.6f);
+        }
+    }
+
     static void tick(MinecraftClient mc) {
         ClientWorld w = mc.world;
         if (w == null || mc.player == null || !(Cfg.wx || Cfg.atmo)) {
             valid = false;
             ripples.clear();
+            splashes.clear();
             return;
         }
         long now = w.getTime();
@@ -54,18 +79,19 @@ final class Weather {
 
         Iterator<double[]> it = ripples.iterator();
         while (it.hasNext()) if (now - it.next()[3] > 24) it.remove();
+        Iterator<double[]> is = splashes.iterator();
+        while (is.hasNext()) if (now - is.next()[3] > 8) is.remove();
 
-        boolean puddles = (Cfg.wx && Cfg.wxPuddles) || (Cfg.atmo && Atmos.theme().storm);
-        boolean ripplesOn = (Cfg.wx && Cfg.wxRipples) || (Cfg.atmo && Atmos.theme().storm);
-        if (valid && puddles && ripplesOn && raining() && ripples.size() < 120) {
-            for (int tries = 0; tries < 6; tries++) {
-                double x = mc.player.getX() + (Math.random() - 0.5) * 24;
-                double z = mc.player.getZ() + (Math.random() - 0.5) * 24;
+        if (valid && wet() && raining()) {
+            boolean rip = (Cfg.wx && Cfg.wxRipples) || storm();
+            boolean spl = (Cfg.wx && Cfg.wxSplash) || storm();
+            for (int i = 0; i < 8; i++) {
+                double x = mc.player.getX() + (Math.random() - 0.5) * 28;
+                double z = mc.player.getZ() + (Math.random() - 0.5) * 28;
                 float f = floorAt(x, z);
-                if (!Float.isNaN(f) && puddle(Math.floor(x), Math.floor(z)) > 0.35) {
-                    ripples.add(new double[]{x, f + 0.015, z, now});
-                    if (ripples.size() % 3 == 0) break;
-                }
+                if (Float.isNaN(f)) continue;
+                if (rip && ripples.size() < 70 && i % 2 == 0) ripples.add(new double[]{x, f + 0.015, z, now, 0});
+                if (spl && splashes.size() < 70) splashes.add(new double[]{x, f + 0.02, z, now, Math.random() * 6.283});
             }
         }
     }
@@ -113,56 +139,94 @@ final class Weather {
     // ------------------------------------------------------------------ drawing
 
     static void draw(MinecraftClient mc, ClientWorld w, Vec3d cam, double t, float td) {
-        boolean storm = Cfg.atmo && Atmos.theme().storm;
-        if (Cfg.wx && Cfg.wxMode != 1) {
+        if (Cfg.wx && Cfg.wxMode != 1 && Cfg.wxDensity > 0.01) {
             boolean drizzle = Cfg.wxMode == 2;
             Falling.draw(Falling.Kind.RAIN, cam, t, Cfg.wxDensity * (drizzle ? 0.4 : 1.0), Cfg.wxSize,
                     drizzle ? 9 : 14, 0.6, Cfg.wxRadius, cam.y + Cfg.wxHeight / 2 - 4, Cfg.wxHeight, RAIN, 0.5f);
         }
-        boolean puddles = (Cfg.wx && Cfg.wxPuddles) || storm;
-        if (!puddles || !valid) return;
-        drawPuddles(w, cam, t, td, Cfg.wx ? Cfg.wxShine : 1.0);
-        if (raining() && ((Cfg.wx && Cfg.wxRipples) || storm)) drawRipples(w, cam, td);
+        if (!valid || !wet()) return;
+        drawSheen(w, cam, t, td);
+        if (raining()) {
+            if ((Cfg.wx && Cfg.wxRipples) || storm()) drawRipples(w, cam, td);
+            if ((Cfg.wx && Cfg.wxSplash) || storm()) drawSplashes(w, cam, td);
+        }
     }
 
-    private static void drawPuddles(ClientWorld w, Vec3d cam, double t, float td, double shine) {
-        float dayF = (float) Math.max(0, Math.min(1, 0.5 + 0.5 * Math.cos(w.getSkyAngle(td) * Math.PI * 2)));
-        float[] col = {0.12f + 0.33f * dayF, 0.18f + 0.37f * dayF, 0.35f + 0.4f * dayF};
-        int rad = (int) Math.min(CR - 1, Cfg.wx ? Cfg.wxRadius : 16);
+    /** Sky reflection on every solid floor: faint underfoot, strong far away (grazing angle), plus puddle patches. */
+    private static void drawSheen(ClientWorld w, Vec3d cam, double t, float td) {
+        double rg = Math.max(w.getRainGradient(td), Cfg.wx && Cfg.wxMode == 1 ? 0.5 : 0);
+        Vec3d sky = w.getSkyColor(cam, td);
+        double lum = (sky.x + sky.y + sky.z) / 3.0;
+        double m = 0.6 * Math.min(1, rg);
+        float[] col = {
+                (float) Math.min(1, sky.x * (1 - m) + lum * 1.15 * 0.92 * m + 0.03),
+                (float) Math.min(1, sky.y * (1 - m) + lum * 1.15 * 0.97 * m + 0.03),
+                (float) Math.min(1, sky.z * (1 - m) + lum * 1.15 * 1.06 * m + 0.04)};
+        double shine = Cfg.wx ? Cfg.wxShine : 1.0;
+        int rad = (int) (Math.min(CR - 1, Cfg.wx ? Cfg.wxRadius : 16) * Math.max(0.5f, Perf.q()));
+        boolean patches = !Cfg.wx || Cfg.wxPuddles;
         int cx = (int) Math.floor(cam.x), cz = (int) Math.floor(cam.z);
-        float k = (float) (0.34 * shine);
+
         for (int x = cx - rad; x < cx + rad; x++) {
             for (int z = cz - rad; z < cz + rad; z++) {
                 float f = floorAt(x + 0.5, z + 0.5);
                 if (Float.isNaN(f)) continue;
-                double a00 = puddle(x, z), a10 = puddle(x + 1, z), a11 = puddle(x + 1, z + 1), a01 = puddle(x, z + 1);
-                if (Math.max(Math.max(a00, a10), Math.max(a11, a01)) < 0.02) continue;
-                double y = f + 0.012 - cam.y;
-                double sh = 0.8 + 0.2 * Math.sin(t * 1.2 + x * 0.7 + z * 0.5);
+                double y = f + 0.012;
+                double ry = y - cam.y;
+                double[] al = AL;
+                int[][] cs = CS;
+                double best = 0;
+                for (int k = 0; k < 4; k++) {
+                    double px = x + cs[k][0], pz = z + cs[k][1];
+                    double dx = px - cam.x, dz = pz - cam.z;
+                    double hd = Math.sqrt(dx * dx + dz * dz);
+                    double d = Math.sqrt(hd * hd + ry * ry);
+                    if (d < 0.01) d = 0.01;
+                    double fres = 0.06 + Math.pow(1 - Math.abs(ry) / d, 2.5);
+                    double wetness = patches ? 0.45 + 0.55 * puddle(px, pz) : 0.7;
+                    double fade = Math.max(0, Math.min(1, (rad - hd) / (rad * 0.35)));
+                    double sh = 0.88 + 0.12 * Math.sin(t * 1.3 + px * 0.6 + pz * 0.4);
+                    al[k] = shine * 0.5 * fres * wetness * fade * sh;
+                    best = Math.max(best, al[k]);
+                }
+                if (best < 0.01) continue;
                 double x0 = x - cam.x, x1 = x + 1 - cam.x, z0 = z - cam.z, z1 = z + 1 - cam.z;
-                Gfx.quad(new Gfx.V(x0, y, z0, col, (float) (a00 * k * sh)),
-                        new Gfx.V(x1, y, z0, col, (float) (a10 * k * sh)),
-                        new Gfx.V(x1, y, z1, col, (float) (a11 * k * sh)),
-                        new Gfx.V(x0, y, z1, col, (float) (a01 * k * sh)));
+                Gfx.quad(new Gfx.V(x0, ry, z0, col, (float) al[0]), new Gfx.V(x1, ry, z0, col, (float) al[1]),
+                        new Gfx.V(x1, ry, z1, col, (float) al[2]), new Gfx.V(x0, ry, z1, col, (float) al[3]));
             }
         }
     }
 
     private static void drawRipples(ClientWorld w, Vec3d cam, float td) {
         double now = w.getTime() + td;
-        float[] col = {0.7f, 0.85f, 1f};
         for (double[] r : ripples) {
             double u = (now - r[3]) / 24.0;
             if (u < 0 || u > 1) continue;
             double rad = 0.06 + 0.4 * u;
             float al = (float) ((1 - u) * 0.7);
             Gfx.Path p = new Gfx.Path();
-            for (int i = 0; i < 14; i++) {
-                double ang = Math.PI * 2 * i / 14;
-                p.add(r[0] - cam.x + Math.cos(ang) * rad, r[1] - cam.y, r[2] - cam.z + Math.sin(ang) * rad, 1, al, col);
+            for (int i = 0; i < 10; i++) {
+                double ang = Math.PI * 2 * i / 10;
+                p.add(r[0] - cam.x + Math.cos(ang) * rad, r[1] - cam.y, r[2] - cam.z + Math.sin(ang) * rad, 1, al, DROP);
             }
-            Gfx.ribbon(p, true, true, 0.06, 0.3f, 0f);
-            Gfx.ribbon(p, true, true, 0.015, 1f, 0.5f);
+            Gfx.ribbon(p, true, true, 0.05, 0.3f, 0f);
+            Gfx.ribbon(p, true, true, 0.013, 1f, 0.5f);
+        }
+    }
+
+    /** Tiny droplets bouncing up where the rain hits the ground. */
+    private static void drawSplashes(ClientWorld w, Vec3d cam, float td) {
+        double now = w.getTime() + td;
+        for (double[] s : splashes) {
+            double u = (now - s[3]) / 8.0;
+            if (u < 0 || u > 1) continue;
+            for (int k = 0; k < 4; k++) {
+                double ang = s[4] + k * 1.5708;
+                double dist = 0.12 * u * (0.7 + 0.3 * k / 3.0);
+                double h = 0.2 * Math.sin(Math.PI * u) * (0.7 + 0.3 * (k % 2));
+                Shapes.dot(s[0] - cam.x + Math.cos(ang) * dist, s[1] - cam.y + h, s[2] - cam.z + Math.sin(ang) * dist,
+                        0.018, DROP, (float) ((1 - u) * 0.8));
+            }
         }
     }
 }

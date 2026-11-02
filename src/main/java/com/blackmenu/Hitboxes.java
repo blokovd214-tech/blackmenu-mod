@@ -21,7 +21,8 @@ final class Hitboxes {
             Vec3d p = e.getLerpedPos(td);
             double dx = p.x - cam.x, dy = p.y - cam.y, dz = p.z - cam.z;
             double d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 > 64 * 64) continue;
+            double lim = 64 * Math.max(0.5, Perf.q());
+            if (d2 > lim * lim) continue;
             box(e, dx, dy, dz, Math.sqrt(d2), t);
         }
     }

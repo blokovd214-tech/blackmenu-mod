@@ -60,6 +60,7 @@ final class Mods {
     static final String[] TIMES = {"Auto|Авто", "Server|Сервер", "Night|Ночь", "Sunset|Закат", "Dawn|Рассвет", "Day|День"};
     static final String[] WX = {"Rain|Дождь", "Wet floor|Мокрый пол", "Drizzle|Морось"};
     static final String[] KFX = {"Blood|Кровь", "Lightning|Молния", "Souls|Души"};
+    static final String[] QUALITY = {"Max|Максимум", "High|Высокое", "Medium|Среднее", "Low|Низкое"};
     static final String[] TITLE_STYLES = {"Helix|Спираль", "Chains|Цепи"};
 
     private Mods() {}
@@ -151,21 +152,36 @@ final class Mods {
                 () -> Cfg.bordersHideCommon, v -> Cfg.bordersHideCommon = v);
         slider(m, "Opacity|Прозрачность", "Border opacity|Прозрачность рамок", 0.2f, 1f, () -> Cfg.bordersAlpha, v -> Cfg.bordersAlpha = v);
 
+        mod(Cat.HUD, "Module list|Список модулей", () -> Cfg.arraylist, v -> Cfg.arraylist = v);
+        mod(Cat.HUD, "Target HUD|Инфо о цели", () -> Cfg.targetHud, v -> Cfg.targetHud = v);
+        mod(Cat.HUD, "Armor HUD|Броня", () -> Cfg.armorHud, v -> Cfg.armorHud = v);
+        mod(Cat.HUD, "Effects HUD|Эффекты", () -> Cfg.effectsHud, v -> Cfg.effectsHud = v);
+
         // ---- Visual
         mod(Cat.VISUAL, "Fullbright|Яркость", () -> Cfg.fullbright, BlackMenuClient::setFullbright);
+
+        m = mod(Cat.VISUAL, "NoRender|Без лишнего", () -> Cfg.nr, v -> Cfg.nr = v);
+        bool(m, "Hurt camera|Тряска камеры", "No shake when you are hit|Без тряски при получении урона", () -> Cfg.nrHurt, v -> Cfg.nrHurt = v);
+        bool(m, "Fire|Огонь", "No fire on the screen and on mobs|Без огня на экране и на мобах", () -> Cfg.nrFire, v -> Cfg.nrFire = v);
+        bool(m, "Dropped items|Выпавшие предметы", "Hide items lying on the ground|Скрыть предметы на земле", () -> Cfg.nrItems, v -> Cfg.nrItems = v);
+        bool(m, "XP orbs|Шарики опыта", "Hide experience orbs|Скрыть шарики опыта", () -> Cfg.nrXp, v -> Cfg.nrXp = v);
+        bool(m, "Armor stands|Стойки для брони", "Hide stands and holograms|Скрыть стойки и голограммы", () -> Cfg.nrStands, v -> Cfg.nrStands = v);
+        bool(m, "Lightning|Молнии", "Hide lightning bolts|Скрыть удары молний", () -> Cfg.nrLightning, v -> Cfg.nrLightning = v);
 
         m = mod(Cat.VISUAL, "Blur+|Размытие GUI", () -> Cfg.blurMenu, v -> Cfg.blurMenu = v);
         slider(m, "Dim|Затемнение", "Extra darkness behind the menu|Доп. затемнение фона", 0f, 0.9f, () -> Cfg.blurDim, v -> Cfg.blurDim = v);
 
         m = mod(Cat.VISUAL, "Weather & wet floor|Погода и мокрый пол", () -> Cfg.wx, v -> Cfg.wx = v);
         mode(m, "Mode|Режим", "Weather mode|Режим работы", WX, () -> Cfg.wxMode, v -> Cfg.wxMode = v);
-        slider(m, "Density|Плотность дождя", "Amount of rain|Количество капель", 0.2f, 2f, () -> Cfg.wxDensity, v -> Cfg.wxDensity = v);
+        bool(m, "Overcast sky|Пасмурное небо", "Rainy gloomy weather on your client|Дождливая пасмурная погода у тебя на клиенте", () -> Cfg.wxOvercast, v -> Cfg.wxOvercast = v);
+        slider(m, "Density|Плотность дождя", "Extra streaks, 0 = off|Доп. капли, 0 = выкл", 0f, 2f, () -> Cfg.wxDensity, v -> Cfg.wxDensity = v);
         slider(m, "Cull radius|Радиус отрисовки", "Draw distance|Дальность отрисовки", 8f, 24f, () -> Cfg.wxRadius, v -> Cfg.wxRadius = v);
         slider(m, "Spawn height|Высота спавна", "Rain column height|Высота столба дождя", 8f, 40f, () -> Cfg.wxHeight, v -> Cfg.wxHeight = v);
         slider(m, "Drop size|Размер капель", "Size of drops|Масштаб капель", 0.5f, 2f, () -> Cfg.wxSize, v -> Cfg.wxSize = v);
-        bool(m, "Puddles|Лужи", "Wet shiny ground|Мокрая блестящая земля", () -> Cfg.wxPuddles, v -> Cfg.wxPuddles = v);
+        bool(m, "Puddles|Лужи", "Puddle patches|Пятна луж", () -> Cfg.wxPuddles, v -> Cfg.wxPuddles = v);
         bool(m, "Ripples|Рябь", "Circles on puddles in rain|Круги на лужах во время дождя", () -> Cfg.wxRipples, v -> Cfg.wxRipples = v);
-        slider(m, "Shine|Блеск", "Wet floor brightness|Яркость мокрого пола", 0.2f, 2f, () -> Cfg.wxShine, v -> Cfg.wxShine = v);
+        bool(m, "Splashes|Брызги", "Droplets bouncing off the ground|Брызги от капель о землю", () -> Cfg.wxSplash, v -> Cfg.wxSplash = v);
+        slider(m, "Shine|Блеск", "Wet floor reflection|Отражение мокрого пола", 0f, 2f, () -> Cfg.wxShine, v -> Cfg.wxShine = v);
 
         m = mod(Cat.VISUAL, "Cave dust|Пыль в пещерах", () -> Cfg.dust, v -> Cfg.dust = v);
         slider(m, "Amount|Количество", "How many specks|Сколько пылинок", 0.1f, 2f, () -> Cfg.dustAmount, v -> Cfg.dustAmount = v);
@@ -211,6 +227,12 @@ final class Mods {
         slider(m, "Size|Размер", "Effect scale|Масштаб", 0.5f, 2f, () -> Cfg.kfxSize, v -> Cfg.kfxSize = v);
 
         // ---- Settings
+        m = mod(Cat.SETTINGS, "Optimization|Оптимизация", null, null);
+        mode(m, "Quality|Качество эффектов", "Fewer particles = more FPS|Меньше частиц = больше FPS", QUALITY,
+                () -> Cfg.quality, v -> Cfg.quality = v);
+        bool(m, "Adaptive|Авто-оптимизация", "Lowers detail when FPS drops|Снижает детали, когда падает FPS",
+                () -> Cfg.adaptive, v -> Cfg.adaptive = v);
+
         m = mod(Cat.SETTINGS, "Interface|Интерфейс", null, null);
         Set sz = slider(m, "Menu size|Размер меню", "Applied when you let go|Применяется после отпускания", 0.6f, 1.5f,
                 () -> Cfg.menuScale, v -> Cfg.menuScale = v);

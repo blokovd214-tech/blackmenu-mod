@@ -20,7 +20,7 @@ final class Falling {
 
     static void draw(Kind k, Vec3d cam, double t, double dens, double size, double speed, double wind,
                      double rad, double cy, double hgt, float[][] pal, float alphaMul) {
-        int n = (int) ((k == Kind.RAIN ? 450 : 260) * dens * (rad / 16.0));
+        int n = (int) ((k == Kind.RAIN ? 450 : 260) * dens * (rad / 16.0) * Perf.q());
         double period = 2 * rad;
         for (int i = 0; i < n; i++) {
             double h1 = hash(i * 7 + 1), h2 = hash(i * 7 + 2), h3 = hash(i * 7 + 3),
